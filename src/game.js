@@ -142,11 +142,12 @@ export class Game {
     const f = p.forward;
     this.camDir.lerp(f, k * 0.6).normalize();
     const speed = Math.abs(p.forwardSpeed);
-    const dist = 6.2 + speed * 0.012;
+    const dist = 4.5 + speed * 0.012;
     const shake = p.impact * 0.25 + Math.max(0, speed - 50) * 0.0012;
+    const defaultHeight = 3;
     this.camPos.set(
       p.x - this.camDir.x * dist + (Math.random() - 0.5) * shake,
-      1.9 + (Math.random() - 0.5) * shake,
+      defaultHeight + (Math.random() - 0.5) * shake,
       p.z - this.camDir.y * dist,
     );
     this.camera.position.lerp(this.camPos, k === 1 ? 1 : Math.min(1, k * 3));
