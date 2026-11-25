@@ -6,7 +6,7 @@ import { ROAD_HALF, laneX } from './world.js';
 const MAX_SPEED = 100; // engine cutoff; drag limits top speed to ~295 km/h
 const MAX_REVERSE = 9;
 const ENGINE = 11; // m/s^2 at standstill, tapers to 0 at MAX_SPEED
-const BRAKE = 40;
+const BRAKE = 100;
 const GRIP = 7; // lateral velocity decay rate (1/s)
 const STEER_RATE = 2.7; // rad/s at low speed
 const STEER_FALLOFF = 30; // speed (m/s) at which steering authority halves
