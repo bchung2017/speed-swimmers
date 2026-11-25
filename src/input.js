@@ -1,4 +1,4 @@
-const DRIVE_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const DRIVE_KEYS = new Set(['ArrowLeft', 'ArrowRight']);
 
 export class Input {
   constructor() {
@@ -19,12 +19,13 @@ export class Input {
     this.keys.clear();
   }
 
-  get throttle() {
-    return this.keys.has('ArrowUp') ? 1 : 0;
+  // Throttle is always on; holding Left and Right together brakes instead.
+  get brake() {
+    return this.keys.has('ArrowLeft') && this.keys.has('ArrowRight') ? 1 : 0;
   }
 
-  get brake() {
-    return this.keys.has('ArrowDown') ? 1 : 0;
+  get throttle() {
+    return 1 - this.brake;
   }
 
   get steer() {

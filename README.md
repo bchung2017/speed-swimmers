@@ -20,9 +20,9 @@ npm run dev
 | Key | Action |
 |---|---|
 | Enter | Start (main menu) / activate focused button |
-| Up | Accelerate |
-| Down | Brake, then reverse |
+| (none) | Accelerates automatically |
 | Left / Right | Steer |
+| Left + Right | Brake, then reverse |
 | Esc | Pause menu (Resume, Main Menu, Quit) |
 
 ## Layout
