@@ -73,6 +73,9 @@ export function resolveImpulse(a, b, c, restitution = 0.2, friction = 0.35) {
   const vn = rvx * c.nx + rvz * c.nz;
   if (vn >= 0) return 0;
 
+  // Gentle contacts (scrapes, resting) get no bounce, so sliding along a car or wall doesn't
+  // ping-pong into a stream of tiny impacts.
+  if (vn > -2) restitution = 0;
   const tA = cross(rax, raz, c.nx, c.nz);
   const tB = cross(rbx, rbz, c.nx, c.nz);
   const j = (-(1 + restitution) * vn) / (a.invM + b.invM + tA * tA * a.invI + tB * tB * b.invI);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { buildPlayerCar } from './car.js';
+import { resolveImpulse } from './physics.js';
 import { ROAD_HALF, laneX } from './world.js';
 
 const MAX_SPEED = 100; // engine cutoff; drag limits top speed to ~295 km/h
@@ -11,13 +12,26 @@ const STEER_RATE = 1.9; // rad/s at low speed
 const STEER_FALLOFF = 30; // speed (m/s) at which steering authority halves
 const SIDES = [-1, 1];
 
-// Losing control: crashes at or above this closing speed (m/s, ~58 km/h) take the wheel away.
+// Crashes at or above this closing speed (m/s, ~58 km/h) reduce control for a short time.
 // Below it, bumps and scrapes only push the car around.
 export const LOSS_OF_CONTROL = 16;
-const CRASH_GRIP = 0.8; // sideways grip while out of control: the car slides on its momentum
-const CRASH_SCRUB = 4; // m/s^2 of tyre scrub while sliding
+// Reduced-control window: CRASH_BASE s at the threshold, +1 s per CRASH_PER_SECOND m/s above it,
+// capped at CRASH_MAX s. Control starts at CRASH_CONTROL and recovers linearly to full.
+const CRASH_BASE = 0.5;
+const CRASH_PER_SECOND = 25;
+const CRASH_MAX = 1.6;
+const CRASH_CONTROL = 0.35;
+// While control is reduced, the tyres also behave more physically: sliding sideways scrubs speed
+// (Coulomb friction) and momentum keeps its direction rather than swinging round with the car.
+const CRASH_SIDE_FRICTION = 8; // m/s^2
+const CRASH_ROLL_FRICTION = 2; // m/s^2
+// Rotational inertia multiplier: >1 makes impacts spin the car less violently than a uniform box.
+const INERTIA_SCALE = 2;
 
-const NO_INPUT = { throttle: 0, brake: 0, steer: 0 };
+// The barrier is an immovable body: zero inverse mass and inertia.
+const WALL = { x: 0, z: 0, vx: 0, vz: 0, w: 0, invM: 0, invI: 0 };
+const wallContact = { depth: 0, nx: 0, nz: 0, px: 0, pz: 0 };
+const wrapAngle = (a) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
 
 export class Player {
   constructor(scene) {
@@ -28,7 +42,7 @@ export class Player {
     this.length = v.length;
     this.width = v.width;
     this.invM = 1;
-    this.invI = 12 / (this.length ** 2 + this.width ** 2);
+    this.invI = 12 / (INERTIA_SCALE * (this.length ** 2 + this.width ** 2));
     this.root = new THREE.Group();
     this.root.add(this.group);
     scene.add(this.root);
@@ -87,6 +101,7 @@ export class Player {
     this.vel.set(0, -27);
     this.impact = 0;
     this.lockout = 0;
+    this.lockoutTotal = 1;
     this.pitch = 0;
     this.accel = 0;
   }
@@ -114,16 +129,22 @@ export class Player {
     this.prevHeading = this.heading;
 
     const crashed = this.lockout > 0;
-    const input = crashed ? NO_INPUT : rawInput;
+    // 1 = full control; after a crash starts at CRASH_CONTROL and recovers over the window.
+    const control = crashed ? CRASH_CONTROL + (1 - CRASH_CONTROL) * (1 - this.lockout / this.lockoutTotal) : 1;
     if (crashed) this.lockout = Math.max(0, this.lockout - dt);
+    const input = rawInput;
 
     const f = this.forward;
     const r = this.right;
     let fwd = this.vel.dot(f);
     let lat = this.vel.dot(r);
+    const f0x = f.x;
+    const f0z = f.y;
+    const r0x = r.x;
+    const r0z = r.y;
 
     // Steering input smoothing.
-    const s = input.steer;
+    const s = input.steer * control;
     const rate = s !== 0 && Math.sign(s) !== Math.sign(this.steer) ? 10 : 6;
     this.steer += THREE.MathUtils.clamp(s - this.steer, -rate * dt, rate * dt);
 
@@ -131,23 +152,36 @@ export class Player {
     let accel = 0;
     if (input.throttle) accel += fwd >= 0 ? ENGINE * (1 - fwd / MAX_SPEED) : BRAKE;
     if (input.brake) accel -= fwd > 0.5 ? BRAKE : fwd > -MAX_REVERSE ? ENGINE * 0.5 : 0;
-    accel -= Math.sign(fwd) * (0.6 + 0.0002 * fwd * fwd + (crashed ? CRASH_SCRUB : 0)); // rolling + air drag
+    accel -= Math.sign(fwd) * (0.6 + 0.0002 * fwd * fwd); // rolling + air drag
     if (!input.throttle && !input.brake && Math.abs(fwd) < 0.3) fwd = 0;
-    fwd += accel * dt;
+    fwd += accel * (accel > 0 ? control : 1) * dt;
+    if (crashed) fwd -= Math.sign(fwd) * Math.min(Math.abs(fwd), CRASH_ROLL_FRICTION * dt);
 
     // Yaw: steering (full authority at low speed, softer at high speed) plus collision spin.
     const auth = Math.min(1, Math.abs(fwd) / 5) / (1 + Math.abs(fwd) / STEER_FALLOFF);
     this.heading += (this.steer * STEER_RATE * auth * Math.sign(fwd || 1) + this.spin) * dt;
-    this.spin *= Math.exp(-(crashed ? 0.7 : 6) * dt);
-    // Gentle self-centering toward the road direction when not steering.
-    if (!crashed && s === 0 && fwd > 5) this.heading -= this.heading * Math.min(1, 0.8 * dt);
+    this.spin *= Math.exp(-(crashed ? 1.5 : 6) * dt);
+    // Gentle self-centering toward the road direction when cruising roughly straight. Only near
+    // straight and only at speed: it must never swing a spun-out or stopped car around.
+    if (!crashed && input.steer === 0 && fwd > 5 && Math.abs(this.heading) < 0.5) {
+      this.heading -= this.heading * Math.min(1, 0.8 * dt * Math.min(1, fwd / 20));
+    }
+    this.heading = wrapAngle(this.heading);
 
-    // Grip: bleed off sideways velocity (this is what gives the slide).
-    lat *= Math.exp(-(crashed ? CRASH_GRIP : GRIP) * dt);
+    // Grip: bleed off sideways velocity (this is what gives the slide). Reduced while recovering
+    // from a crash, plus physical side scrub.
+    lat *= Math.exp(-GRIP * control * dt);
+    if (crashed) lat -= Math.sign(lat) * Math.min(Math.abs(lat), CRASH_SIDE_FRICTION * dt);
 
-    const nf = this.forward;
-    const nr = this.right;
-    this.vel.set(nf.x * fwd + nr.x * lat, nf.y * fwd + nr.y * lat);
+    if (crashed) {
+      // Momentum keeps its direction: rebuild velocity in the frame it was measured in.
+      this.vel.set(f0x * fwd + r0x * lat, f0z * fwd + r0z * lat);
+    } else {
+      // Arcade grip: velocity follows the car's new heading.
+      const nf = this.forward;
+      const nr = this.right;
+      this.vel.set(nf.x * fwd + nr.x * lat, nf.y * fwd + nr.y * lat);
+    }
     this.x += this.vel.x * dt;
     this.z += this.vel.y * dt;
 
@@ -160,9 +194,11 @@ export class Player {
   hit(severity) {
     this.impact = Math.max(this.impact, Math.min(1, severity / 25));
     if (severity >= LOSS_OF_CONTROL) {
-      // Bigger crash, longer without control: 1 s at the threshold up to 3.5 s.
-      this.lockout = Math.max(this.lockout, Math.min(3.5, 1 + (severity - LOSS_OF_CONTROL) / 12));
-      this.steer = 0;
+      const t = Math.min(CRASH_MAX, CRASH_BASE + (severity - LOSS_OF_CONTROL) / CRASH_PER_SECOND);
+      if (t > this.lockout) {
+        this.lockout = t;
+        this.lockoutTotal = t;
+      }
     }
   }
 
@@ -190,27 +226,43 @@ export class Player {
     this.spin = b.w;
   }
 
-  // Half extent of the rotated car along world x.
-  #extentX() {
-    const c = Math.abs(Math.cos(this.heading));
-    const s = Math.abs(Math.sin(this.heading));
-    return c * (this.width / 2) + s * (this.length / 2);
-  }
-
+  // Barriers: the car's deepest corner is pushed out and an impulse is applied against an immovable
+  // wall at that corner. Spin and scraping come out of the impulse (no heading snapping), and a hard
+  // enough hit counts as a crash like any other.
   #barriers(dt) {
-    const ex = this.#extentX();
+    const hw = this.width / 2;
+    const hl = this.length / 2;
+    const fx = -Math.sin(this.heading);
+    const fz = -Math.cos(this.heading);
+    const rx = Math.cos(this.heading);
+    const rz = -Math.sin(this.heading);
     const limit = ROAD_HALF - 0.05;
     for (const side of SIDES) {
-      const over = side * this.x + ex - limit;
-      if (over <= 0) continue;
-      this.x -= side * over;
-      if (side * this.vel.x > 0) {
-        this.impact = Math.max(this.impact, Math.min(1, Math.abs(this.vel.x) / 15));
-        this.vel.x = -this.vel.x * 0.25;
+      let depth = 0;
+      let cx = 0;
+      let cz = 0;
+      for (const a of SIDES) {
+        for (const b of SIDES) {
+          const px = this.x + rx * hw * a + fx * hl * b;
+          const pen = side * px - limit;
+          if (pen > depth) {
+            depth = pen;
+            cx = px;
+            cz = this.z + rz * hw * a + fz * hl * b;
+          }
+        }
       }
-      this.vel.multiplyScalar(Math.exp(-1.2 * dt)); // scrape
-      this.spin *= Math.exp(-4 * dt);
-      if (!this.outOfControl) this.heading *= Math.exp(-6 * dt); // align with the wall
+      if (depth <= 0) continue;
+      this.x -= side * depth;
+      wallContact.nx = -side;
+      wallContact.nz = 0;
+      wallContact.px = cx - side * depth;
+      wallContact.pz = cz;
+      const body = this.body();
+      const severity = resolveImpulse(body, WALL, wallContact, 0.15, 0.3);
+      this.setBody(body);
+      this.vel.multiplyScalar(Math.exp(-0.4 * dt)); // light scrape
+      if (severity > 0) this.hit(severity);
     }
   }
 
@@ -218,7 +270,8 @@ export class Player {
   sync(dt, alpha) {
     this.renderX = this.prevX + (this.x - this.prevX) * alpha;
     this.renderZ = this.prevZ + (this.z - this.prevZ) * alpha;
-    this.renderHeading = this.prevHeading + (this.heading - this.prevHeading) * alpha;
+    // Shortest-path interpolation: heading wraps at ±π.
+    this.renderHeading = this.prevHeading + wrapAngle(this.heading - this.prevHeading) * alpha;
     this.root.position.set(this.renderX, 0, this.renderZ);
     this.root.rotation.y = this.renderHeading;
     // Body roll and pitch for weight transfer.

@@ -34,7 +34,7 @@ npm run dev
 - `src/player.js` — arcade car physics, crash lockout (loss of control), barrier collisions
 - `src/traffic.js` — AI traffic: car-following, lane changes, light-hit nudges, sliding wrecks, player collisions
 - `src/physics.js` — oriented-box contact (SAT) and rigid-body impulse with spin and friction
-- `src/wreck.js` — pre-fractured vehicle rigs staged near the player, dents, flying chunks and shards
+- `src/wreck.js` — deformable vehicle rigs staged near the player, inward dents, debris particles
 - `src/car.js` — procedural low-poly vehicles (player coupe, sedan, SUV, box truck), merged per material layer; traffic is instanced
 - `src/input.js` — arrow-key state
 - `src/style.css` — menu/HUD styling and palette tokens
@@ -47,9 +47,9 @@ npm run dev
 | Chase camera distance / height / look-ahead | `CAM_*` constants at the top of `src/game.js` |
 | Bloom strength, threshold, per-pixel cap | `BLOOM_*` constants at the top of `src/game.js` |
 | Steering, grip, engine, brakes | constants at the top of `src/player.js` |
-| Crash severity for loss of control (m/s closing speed) | `LOSS_OF_CONTROL` in `src/player.js` |
-| Traffic mass, dent / wreck thresholds, rig staging range | constants at the top of `src/traffic.js` |
-| Debris amount, chunk grid, shard pool | constants at the top of `src/wreck.js` |
+| Crash threshold, reduced-control duration and strength | `LOSS_OF_CONTROL`, `CRASH_*` in `src/player.js` |
+| Traffic mass, dent / wreck / airborne thresholds, launch height, rig staging range | constants at the top of `src/traffic.js` |
+| Dent depth, debris particle pool | constants at the top of `src/wreck.js` |
 | Lane width (derived: widest vehicle + player + `SQUEEZE_MARGIN`) | `src/world.js` |
 
 ## Performance notes

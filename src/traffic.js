@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildTrafficFleet, TRAFFIC_COLORS } from './car.js';
 import { obbContact, resolveImpulse } from './physics.js';
+import { CENTRE_HEIGHT } from './wreck.js';
 import { LANES, LANE_W, ROAD_HALF, laneX, mulberry } from './world.js';
 
 const FLEET = { sedan: 38, suv: 18, truck: 8 };
@@ -13,6 +14,13 @@ const MASS = { sedan: 0.35, suv: 0.5, truck: 1.4 };
 // Closing speeds (m/s) that trigger damage stages.
 const DENT_SEVERITY = 2.5; // swap in the fractured rig and dent it
 const WRECK_SEVERITY = 7; // the car loses its lane and becomes a sliding wreck
+// Big wrecks launch the car: above AIR_SEVERITY it gets upward velocity of AIR_LIFT m/s per m/s of
+// closing speed above it (capped at AIR_MAX), scaled per type, plus tumble.
+const AIR_SEVERITY = 12;
+const AIR_LIFT = 0.45;
+const AIR_MAX = 11;
+const LIFT_SCALE = { sedan: 1, suv: 0.8, truck: 0.35 };
+const GRAVITY = 9.8;
 // Fractured rigs are staged on cars within this distance of the player, ready for an instant swap.
 const STAGE_RANGE = 70;
 const STAGE_MAX = 12;
@@ -76,6 +84,15 @@ export class Traffic {
           vx: 0,
           vz: 0,
           w: 0,
+          y: 0,
+          vy: 0,
+          pitch: 0,
+          roll: 0,
+          wp: 0,
+          wr: 0,
+          py: 0,
+          ppitch: 0,
+          proll: 0,
           rig: null,
           rigActive: false,
         });
@@ -116,6 +133,7 @@ export class Traffic {
     c.rig = null;
     c.rigActive = false;
     c.wreck = false;
+    c.y = c.vy = c.pitch = c.roll = c.wp = c.wr = c.py = c.ppitch = c.proll = 0;
     c.lane = lane;
     c.baseX = c.x = c.fromX = c.toX = laneX(lane);
     c.offX = c.offV = 0;
@@ -173,6 +191,9 @@ export class Traffic {
       c.px = c.x;
       c.pz = c.z;
       c.ph = c.heading;
+      c.py = c.y;
+      c.ppitch = c.pitch;
+      c.proll = c.roll;
       if (c.wreck) this.#updateWreck(c, dt);
       else this.#updateLane(c, dt, player, playerFwd);
 
@@ -230,21 +251,48 @@ export class Traffic {
     }
 
     // Lateral shove from light hits springs back to the lane.
-    c.offV += (-10 * c.offX - 5 * c.offV) * dt;
+    c.offV += (-6 * c.offX - 5 * c.offV) * dt;
     c.offX += c.offV * dt;
     c.x = c.baseX + c.offX;
     c.heading = -Math.atan2(laneRate + c.offV, c.speed + 0.01);
   }
 
   #updateWreck(c, dt) {
-    // Sliding, spinning, tyre-scrubbing to a stop.
-    const sp = Math.hypot(c.vx, c.vz);
-    if (sp > 0) {
-      const k = Math.max(0, sp - 7 * dt) / sp;
-      c.vx *= k;
-      c.vz *= k;
+    // Ballistic flight and tumbling.
+    if (c.y > 0 || c.vy > 0) {
+      c.vy -= GRAVITY * dt;
+      c.y += c.vy * dt;
+      if (c.y <= 0) {
+        c.y = 0;
+        if (c.vy < -2) {
+          c.vy *= -0.3; // bounce
+          c.wp *= 0.5;
+          c.wr *= 0.5;
+          c.w *= 0.7;
+        } else {
+          c.vy = 0;
+        }
+      }
     }
-    c.w *= Math.exp(-1.5 * dt);
+    c.pitch += c.wp * dt;
+    c.roll += c.wr * dt;
+    const grounded = c.y <= 0 && c.vy === 0;
+    if (grounded) {
+      // Settle onto wheels or roof, whichever is nearer.
+      const k = Math.min(1, 5 * dt);
+      c.roll += (Math.round(c.roll / Math.PI) * Math.PI - c.roll) * k;
+      c.pitch += (Math.round(c.pitch / Math.PI) * Math.PI - c.pitch) * k;
+      c.wp *= Math.exp(-5 * dt);
+      c.wr *= Math.exp(-5 * dt);
+      // Sliding, spinning, tyre-scrubbing to a stop (no friction in the air).
+      const sp = Math.hypot(c.vx, c.vz);
+      if (sp > 0) {
+        const f = Math.max(0, sp - 7 * dt) / sp;
+        c.vx *= f;
+        c.vz *= f;
+      }
+      c.w *= Math.exp(-1.5 * dt);
+    }
     c.x += c.vx * dt;
     c.z += c.vz * dt;
     c.heading += c.w * dt;
@@ -265,7 +313,7 @@ export class Traffic {
     let worst = 0;
     player.obb(obbA);
     for (const c of this.cars) {
-      if (Math.abs(c.z - player.z) > 14 || Math.abs(c.x - player.x) > 8) continue;
+      if (Math.abs(c.z - player.z) > 14 || Math.abs(c.x - player.x) > 8 || c.y > 1.2) continue;
       obbB.x = c.x;
       obbB.z = c.z;
       obbB.h = c.heading;
@@ -306,6 +354,16 @@ export class Traffic {
         c.vx = bodyB.vx;
         c.vz = bodyB.vz;
         c.w = bodyB.w;
+        if (severity >= AIR_SEVERITY) {
+          const lift = Math.min(AIR_MAX, (severity - AIR_SEVERITY) * AIR_LIFT) * LIFT_SCALE[c.type];
+          c.vy = Math.max(c.vy, lift * (0.7 + 0.3 * Math.random()));
+          // Tumble: roll from side hits, pitch from nose/tail hits (a hit from behind kicks the rear
+          // up), plus some randomness so no two wrecks fly the same way.
+          const side = ct.nx * Math.cos(c.heading) - ct.nz * Math.sin(c.heading);
+          const end = ct.nx * Math.sin(c.heading) + ct.nz * Math.cos(c.heading);
+          c.wr += side * lift * (0.6 + 0.6 * Math.random()) + (Math.random() - 0.5) * lift * 0.5;
+          c.wp += -end * lift * (0.25 + 0.25 * Math.random());
+        }
       } else {
         c.speed = Math.max(0, -bodyB.vz);
         c.offV += bodyB.vx - lateral;
@@ -322,8 +380,8 @@ export class Traffic {
     c.rigActive = true;
     const g = c.rig.group;
     g.visible = true;
-    g.position.set(c.x, 0, c.z);
-    g.rotation.set(0, c.heading, 0);
+    g.position.set(c.x, c.y + CENTRE_HEIGHT[c.type], c.z);
+    g.rotation.set(c.pitch, c.heading, c.roll);
     // Contact point and dent direction (into the car, away from the player) in the car's frame.
     const cos = Math.cos(c.heading);
     const sin = Math.sin(c.heading);
@@ -360,8 +418,13 @@ export class Traffic {
       }
 
       if (c.rigActive) {
-        c.rig.group.position.set(x, 0, z);
-        c.rig.group.rotation.set(0, h, 0);
+        const y = c.py + (c.y - c.py) * alpha;
+        c.rig.group.position.set(x, y + CENTRE_HEIGHT[c.type], z);
+        c.rig.group.rotation.set(
+          c.ppitch + (c.pitch - c.ppitch) * alpha,
+          h,
+          c.proll + (c.roll - c.proll) * alpha,
+        );
         m4.compose(pos.set(x, -50, z), q, zero);
       } else {
         q.setFromAxisAngle(up, h);
