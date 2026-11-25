@@ -47,7 +47,8 @@ const tmpS = new THREE.Vector3();
 
 class Builder {
   constructor() {
-    this.layers = { paint: [], fixed: [], glow: [], tail: [] };
+    // sigL / sigR: turn-signal lenses (left = -x, right = +x), brightness driven per instance.
+    this.layers = { paint: [], fixed: [], glow: [], tail: [], sigL: [], sigR: [] };
   }
 
   add(layer, geo, color, matrix) {
@@ -104,6 +105,7 @@ class Builder {
 }
 
 const DARK_RIM = 0x2a2c30;
+const SIGNAL_AMBER = 0xff8a10;
 
 // Generic passenger body. p: { L, W, hood, deck, roof, cabin:[zFront, zRoofF, zRoofR, zRear], paint, glass }
 function passengerBody(b, p) {
@@ -259,6 +261,10 @@ export function trafficGeometry(type) {
     for (const s of [-1, 1]) {
       b.box('tail', 0xff1a10, 0.25, 0.25, 0.04, s * (W / 2 - 0.2), 0.9, hl + 0.01);
       b.glow(0xfff2dd, 1.4, 0.3, 0.15, 0.04, s * (W / 2 - 0.3), 0.8, -hl - 0.01);
+      const sig = s < 0 ? 'sigL' : 'sigR';
+      b.box(sig, SIGNAL_AMBER, 0.25, 0.2, 0.04, s * (W / 2 - 0.2), 1.2, hl + 0.01);
+      b.box(sig, SIGNAL_AMBER, 0.22, 0.14, 0.04, s * (W / 2 - 0.12), 1.0, -hl - 0.01);
+      b.box(sig, SIGNAL_AMBER, 0.04, 0.12, 0.3, s * (W / 2 + 0.01), 1.0, -hl + 0.5);
     }
     b.glow(0xffa030, 1.3, W - 0.3, 0.05, 0.04, 0, 3.45, hl + 0.01);
     return { layers: b.build(), length: L, width: W };
@@ -272,6 +278,12 @@ export function trafficGeometry(type) {
   for (const s of [-1, 1]) {
     b.box('tail', 0xff1a10, 0.42, 0.09, 0.04, s * (hw - 0.32), ty, hl + 0.005);
     b.glow(0xfff2dd, 1.4, 0.36, 0.09, 0.04, s * (hw - 0.3), p.hood - 0.18, -hl - 0.005);
+    // Signal lenses sit proud of the body surface: rear below the taillight, front below the
+    // headlight, plus a side repeater on the front fender.
+    const sig = s < 0 ? 'sigL' : 'sigR';
+    b.box(sig, SIGNAL_AMBER, 0.3, 0.08, 0.04, s * (hw - 0.32), ty - 0.13, hl + 0.01);
+    b.box(sig, SIGNAL_AMBER, 0.26, 0.08, 0.04, s * (hw - 0.3), p.hood - 0.3, -hl - 0.012);
+    b.box(sig, SIGNAL_AMBER, 0.03, 0.07, 0.2, s * (hw + 0.01), p.hood - 0.25, -hl + 0.6);
   }
   return { layers: b.build(), length: p.L, width: p.W };
 }
@@ -281,6 +293,8 @@ export const trafficMats = {
   fixed: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6, metalness: 0.2 }),
   glow: glowMat,
   tail: new THREE.MeshBasicMaterial({ vertexColors: true }),
+  sigL: new THREE.MeshBasicMaterial({ vertexColors: true }),
+  sigR: new THREE.MeshBasicMaterial({ vertexColors: true }),
 };
 
 // Returns { type: { meshes: {layer: InstancedMesh}, count, length, width } }.

@@ -10,6 +10,23 @@ const AHEAD = 700; // traffic exists from player.z - AHEAD ...
 const BEHIND = 160; // ... to player.z + BEHIND
 const LANE_CHANGE_TIME = 2.2;
 
+// Turn signals: share of drivers who indicate, how long they indicate before moving over, how long
+// they wait for the lane to clear before giving up, and blink rate. Wrecks run their hazards.
+const SIGNAL_SHARE = 0.85;
+const SIGNAL_LEAD = [1.2, 2.6]; // s
+const SIGNAL_URGENT = 0.6; // s, when swerving around a wreck
+const SIGNAL_GIVE_UP = 3; // s
+const BLINK_HZ = 1.5;
+const SIG_ON = new THREE.Color().setScalar(2.2);
+const SIG_OFF = new THREE.Color().setScalar(0.12);
+
+// Cruise speeds (m/s): cars 21-38 (~76-137 km/h), trucks 19-26; left lanes run faster; each driver
+// drifts +/-SPEED_DRIFT around their own pace. Drivers stuck behind slower traffic pass.
+const CAR_SPEED = [21, 38];
+const TRUCK_SPEED = [19, 26];
+const LANE_SPEED_BIAS = 1.2; // m/s per lane left of centre
+const SPEED_DRIFT = 1.5;
+
 // Mass relative to the player car (1.0). Traffic is deliberately light so the player can shove it.
 const MASS = { sedan: 0.35, suv: 0.5, truck: 1.4 };
 // Closing speeds (m/s) that trigger damage stages.
@@ -87,6 +104,17 @@ export class Traffic {
           toLane: -1,
           laneT: 1,
           nextChange: 0,
+          signals: false,
+          signal: 0,
+          signalT: 0,
+          signalWait: 0,
+          pendingLane: -1,
+          patience: 0,
+          sigShownL: null,
+          sigShownR: null,
+          cruiseBase: 0,
+          speedPhase: 0,
+          speedRate: 0,
           skewBias: 0,
           skewPhase: 0,
           skewRate: 0,
@@ -113,6 +141,8 @@ export class Traffic {
         });
         if (type !== 'truck') f.meshes.paint.setColorAt(idx, color);
         f.meshes.tail.setColorAt(idx, TAIL_OFF);
+        f.meshes.sigL.setColorAt(idx, SIG_OFF);
+        f.meshes.sigR.setColorAt(idx, SIG_OFF);
       }
     }
     // Shuffle so spawn order mixes vehicle types.
@@ -149,6 +179,7 @@ export class Traffic {
     c.rig = null;
     c.rigActive = false;
     c.wreck = false;
+    c.sigShownL = c.sigShownR = null;
     c.y = c.vy = c.pitch = c.roll = c.wp = c.wr = c.py = c.ppitch = c.proll = 0;
     c.lane = lane;
     c.baseX = c.x = c.fromX = c.toX = laneX(lane);
@@ -160,8 +191,16 @@ export class Traffic {
     c.px = c.x;
     c.pz = c.z;
     c.ph = 0;
-    c.cruise = c.type === 'truck' ? 21 + this.rng() * 4 : 24 + this.rng() * 12;
+    const [lo, hi] = c.type === 'truck' ? TRUCK_SPEED : CAR_SPEED;
+    c.cruiseBase = lo + this.rng() * (hi - lo) + (2 - lane) * LANE_SPEED_BIAS;
+    c.speedPhase = this.rng() * Math.PI * 2;
+    c.speedRate = (2 * Math.PI) / (10 + this.rng() * 15);
+    c.cruise = c.cruiseBase;
     c.speed = c.cruise;
+    c.signals = this.rng() < SIGNAL_SHARE;
+    c.signal = 0;
+    c.pendingLane = -1;
+    c.patience = 0;
     c.nextChange = 4 + this.rng() * 14;
     c.braking = false;
     // Where this driver sits in the lane: a fixed lean plus a slow wander (fractions of maxLean).
@@ -207,6 +246,7 @@ export class Traffic {
   }
 
   update(dt, player) {
+    this.time = (this.time ?? 0) + dt;
     const playerFwd = player.forwardSpeed;
     for (const c of this.cars) {
       c.px = c.x;
@@ -234,7 +274,21 @@ export class Traffic {
     }
   }
 
+  // Begin moving into `lane` if it is clear of traffic and the player. Returns whether it started.
+  #startChange(c, lane, player) {
+    const playerClear = Math.abs(player.x - laneX(lane)) > LANE_W * 0.8 || Math.abs(player.z - c.z) > 30;
+    if (!playerClear || !this.#laneFree(lane, c.z, 14)) return false;
+    c.fromX = c.baseX;
+    c.toX = laneX(lane);
+    c.toLane = lane;
+    c.laneT = 0;
+    c.pendingLane = -1;
+    return true;
+  }
+
   #updateLane(c, dt, player, playerFwd) {
+    c.speedPhase += c.speedRate * dt;
+    c.cruise = c.cruiseBase + SPEED_DRIFT * Math.sin(c.speedPhase);
     this.#leader(c, player, playerFwd);
     const gap = this.leadGap;
     const safe = 8 + c.speed * 1.1;
@@ -245,18 +299,44 @@ export class Traffic {
     c.braking = target < c.speed - 0.5 || gap < safe * 0.6;
     c.z -= c.speed * dt;
 
-    // Lane changes: occasional, or immediately to get around a wreck.
+    // Lane changes: occasional, to pass slower traffic (mostly on the left), or urgently around a
+    // wreck. Signalling drivers indicate first and only move once the lane is clear.
+    const urgent = this.leadWreck && gap < 80;
+    const stuck = gap < safe * 1.6 && this.leadSpeed < c.cruise - 3;
     c.nextChange -= dt;
-    if (this.leadWreck && gap < 80 && c.nextChange > 0.3) c.nextChange = 0;
-    if (c.laneT >= 1 && c.nextChange <= 0) {
+    c.patience -= dt;
+    if (urgent && c.nextChange > 0.3) c.nextChange = 0;
+    if (stuck && c.patience <= 0 && c.nextChange > 1.5) c.nextChange = 1.5;
+    if (c.laneT >= 1 && c.pendingLane < 0 && c.nextChange <= 0) {
       c.nextChange = 6 + this.rng() * 14;
-      const lane = c.lane + (this.rng() < 0.5 ? -1 : 1);
-      const playerClear = Math.abs(player.x - laneX(lane)) > LANE_W * 0.8 || Math.abs(player.z - c.z) > 30;
-      if (lane >= 0 && lane < LANES && playerClear && this.#laneFree(lane, c.z, 14)) {
-        c.fromX = c.baseX;
-        c.toX = laneX(lane);
-        c.toLane = lane;
-        c.laneT = 0;
+      // Look before signalling: prefer the left when passing, but take whichever adjacent lane isn't
+      // jammed alongside; if both are, don't signal at all.
+      const first = (urgent || stuck ? this.rng() < 0.75 : this.rng() < 0.5) ? -1 : 1;
+      const open = (l) => l >= 0 && l < LANES && this.#laneFree(l, c.z, 6);
+      const dir = open(c.lane + first) ? first : open(c.lane - first) ? -first : 0;
+      const lane = c.lane + dir;
+      if (dir !== 0) {
+        if (c.signals) {
+          c.pendingLane = lane;
+          c.signal = dir;
+          c.signalT = urgent ? SIGNAL_URGENT : SIGNAL_LEAD[0] + this.rng() * (SIGNAL_LEAD[1] - SIGNAL_LEAD[0]);
+          c.signalWait = SIGNAL_GIVE_UP;
+        } else {
+          this.#startChange(c, lane, player);
+        }
+      }
+    }
+    if (c.pendingLane >= 0) {
+      c.signalT -= dt;
+      if (c.signalT <= 0 && !this.#startChange(c, c.pendingLane, player)) {
+        c.signalWait -= dt;
+        if (c.signalWait <= 0) {
+          // Gave up: settle in behind for a while before trying again, so indicators stay meaningful.
+          c.pendingLane = -1;
+          c.signal = 0;
+          c.patience = 5 + this.rng() * 5;
+          c.nextChange = Math.max(c.nextChange, c.patience);
+        }
       }
     }
     let laneRate = 0;
@@ -268,6 +348,7 @@ export class Traffic {
       if (c.laneT >= 1) {
         c.lane = c.toLane;
         c.toLane = -1;
+        c.signal = 0;
       }
     }
 
@@ -446,6 +527,7 @@ export class Traffic {
 
   // Push interpolated transforms, brake lights and staged rigs to the GPU (once per rendered frame).
   sync(alpha, player) {
+    const blink = ((this.time ?? 0) * BLINK_HZ) % 1 < 0.5;
     let staged = 0;
     for (const c of this.cars) if (c.rig && !c.rigActive) staged++;
 
@@ -464,6 +546,25 @@ export class Traffic {
           this.wreckage.release(c.rig);
           c.rig = null;
           staged--;
+        }
+      }
+
+      // Indicators (and hazards on wrecks) blink in sync across the fleet.
+      const left = blink && (c.wreck || c.signal < 0);
+      const right = blink && (c.wreck || c.signal > 0);
+      if (c.rigActive) {
+        c.rig.sigMats.sigL.color.copy(left ? SIG_ON : SIG_OFF);
+        c.rig.sigMats.sigR.color.copy(right ? SIG_ON : SIG_OFF);
+      } else {
+        if (left !== c.sigShownL) {
+          c.meshes.sigL.setColorAt(c.idx, left ? SIG_ON : SIG_OFF);
+          c.meshes.sigL.instanceColor.needsUpdate = true;
+          c.sigShownL = left;
+        }
+        if (right !== c.sigShownR) {
+          c.meshes.sigR.setColorAt(c.idx, right ? SIG_ON : SIG_OFF);
+          c.meshes.sigR.instanceColor.needsUpdate = true;
+          c.sigShownR = right;
         }
       }
 

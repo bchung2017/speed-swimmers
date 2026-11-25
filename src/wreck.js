@@ -21,6 +21,8 @@ const rigMats = {
   fixed: trafficMats.fixed.clone(),
   glow: trafficMats.glow.clone(),
   tail: new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color().setScalar(0.6) }),
+  sigL: new THREE.MeshBasicMaterial({ vertexColors: true }),
+  sigR: new THREE.MeshBasicMaterial({ vertexColors: true }),
 };
 for (const m of Object.values(rigMats)) m.side = THREE.DoubleSide;
 
@@ -47,11 +49,14 @@ class Rig {
     this.group.add(this.inner);
     this.paintMat = trafficMats.paint.clone();
     this.paintMat.side = THREE.DoubleSide;
+    // Own signal materials so a wreck can flash its hazards.
+    this.sigMats = { sigL: rigMats.sigL.clone(), sigR: rigMats.sigR.clone() };
     this.layers = [];
     for (const [layer, geo] of Object.entries(template)) {
       if (!geo) continue;
       const g = geo.clone();
-      const mesh = new THREE.Mesh(g, layer === 'paint' ? this.paintMat : rigMats[layer]);
+      const mat = layer === 'paint' ? this.paintMat : (this.sigMats[layer] ?? rigMats[layer]);
+      const mesh = new THREE.Mesh(g, mat);
       mesh.castShadow = mesh.receiveShadow = layer === 'paint' || layer === 'fixed';
       this.inner.add(mesh);
       this.layers.push({ mesh, original: geo.attributes.position.array });
