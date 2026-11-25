@@ -15,10 +15,27 @@ npm run dev
 
 `npm run build` outputs a static bundle to `dist/`.
 
+## Controls
+
+| Key | Action |
+|---|---|
+| Enter | Start (main menu) / activate focused button |
+| Up | Accelerate |
+| Down | Brake, then reverse |
+| Left / Right | Steer |
+| Esc | Pause menu (Resume, Main Menu, Quit) |
+
 ## Layout
 
-- `index.html` — page shell and start menu overlay
-- `src/main.js` — menu wiring; starts the scene on Start
-- `src/scene.js` — renderer, scene, camera, resize, render loop
-- `src/style.css` — menu styling and palette tokens
+- `index.html` — page shell, HUD, main/pause/quit overlays
+- `src/main.js` — menu state machine (menu → playing ⇄ paused → quit)
+- `src/game.js` — renderer, bloom post-processing, fixed-step loop (120 Hz), chase camera
+- `src/world.js` — endless highway: road, barriers, streetlights, skyline; recycled around the player
+- `src/player.js` — arcade car physics, barrier and traffic collisions
+- `src/traffic.js` — AI traffic: car-following, lane changes, recycling ahead/behind the player
+- `src/car.js` — procedural low-poly vehicles (player coupe, sedan, SUV, box truck)
+- `src/input.js` — arrow-key state
+- `src/style.css` — menu/HUD styling and palette tokens
 - `scripts/dev-sync.mjs` — dev server + auto-pull loop
+
+In dev builds the `Game` instance is exposed as `window.game` for console debugging.

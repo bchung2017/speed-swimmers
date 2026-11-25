@@ -8,10 +8,30 @@
   </head>
   <body>
     <div id="app"></div>
-    <div id="menu">
-      <h1>SPEED SWIMMERS</h1>
-      <button id="start">Start</button>
+
+    <div id="hud" class="hidden">
+      <span id="speed">0</span><span class="unit">km/h</span>
     </div>
+
+    <div id="menu" class="overlay">
+      <h1>SPEED SWIMMERS</h1>
+      <button data-action="start">Start</button>
+      <button data-action="quit">Quit</button>
+      <p class="hint">Enter to start · Arrow keys to drive · Esc to pause</p>
+    </div>
+
+    <div id="pause" class="overlay dim hidden">
+      <h2>PAUSED</h2>
+      <button data-action="resume">Resume</button>
+      <button data-action="main">Main Menu</button>
+      <button data-action="quit">Quit</button>
+    </div>
+
+    <div id="quit" class="overlay hidden">
+      <h2>See you on the highway.</h2>
+      <p class="hint">You can close this tab.</p>
+    </div>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
