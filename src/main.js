@@ -1,5 +1,6 @@
 import { Game } from './game.js';
 import { Input } from './input.js';
+import { PRESETS, PRESET_ORDER } from './lighting.js';
 
 const screens = {
   menu: document.getElementById('menu'),
@@ -25,6 +26,27 @@ if (import.meta.env.DEV) {
 
 let state = 'menu';
 
+// Time of day: remembered per browser (storage can be unavailable, e.g. private mode).
+const timeButton = document.getElementById('time');
+function loadTime() {
+  try {
+    const t = localStorage.getItem('timeOfDay');
+    return PRESETS[t] ? t : 'day';
+  } catch {
+    return 'day';
+  }
+}
+function setTime(name) {
+  game.setTimeOfDay(name);
+  timeButton.textContent = `Time: ${PRESETS[name].label}`;
+  try {
+    localStorage.setItem('timeOfDay', name);
+  } catch {
+    // not persisted; fine
+  }
+}
+setTime(loadTime());
+
 function show(name) {
   for (const [key, el] of Object.entries(screens)) el.classList.toggle('hidden', key !== name);
   hudEl.classList.toggle('hidden', name !== null);
@@ -42,6 +64,10 @@ const actions = {
   start() {
     game.reset();
     setState('playing');
+  },
+  time() {
+    const i = PRESET_ORDER.indexOf(game.timeOfDay);
+    setTime(PRESET_ORDER[(i + 1) % PRESET_ORDER.length]);
   },
   resume() {
     setState('playing');

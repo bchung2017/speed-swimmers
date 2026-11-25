@@ -10,8 +10,21 @@ Third-party reference images used as mood/tone inspiration only. Not project ass
 | `04-cinematic-overpass-chase.jpg` | Low chase camera, sodium-orange streetlights, yellow road markings, three-wide pack racing on an elevated freeway |
 | `05-default-car-front.jpg` | **Project asset target — default player car**, front three-quarter. See below. |
 | `05-default-car-rear.jpg` | Same car, rear three-quarter. |
+| `06-env-sunken-highway.jpg` | Sunken highway between stone retaining walls, street trees on top, prewar limestone and brick blocks, glass towers behind, ornamental lamp over the median |
+| `07-env-cantilever-river-bridge.jpg` | Stacked cantilevered highway decks, waterfront, suspension bridge with stone towers, dense mixed blocks, mature trees |
+| `08-env-boulevard-elevated-rail.jpg` | Green steel elevated railway alongside a wide boulevard, glass and brick buildings layered to a skyline, tree-lined medians |
+| `09-env-golden-hour.png` | Low sun ahead down the highway corridor, long shadows, warm haze, waterfront railing |
+
+A fifth reference (waterfront parkway with a divided highway and a far-shore skyline across the river) was a watermarked stock preview and is not stored here.
 
 Common threads: night-only setting, high-contrast neon on dark wet asphalt, sodium-vapor street lighting, tuner-culture car customization, arcade handling with a speed-forward camera.
+
+## Environment direction (from 06–09)
+
+- Daylight by default; golden hour and night as alternatives (menu: Time).
+- Dense, layered city: rows of blocks stepping back from the highway, heights rising with distance downtown; skyline of towers with setbacks and spires behind.
+- Districts change every few hundred metres: downtown towers, midrise brick with rooftop water towers, parks, waterfronts with a far-shore skyline and bridges.
+- Highway furniture from the references: stone retaining walls (sunken sections), overpasses, green steel elevated railway, footbridges, green sign gantries.
 
 ## Art direction (from 05)
 

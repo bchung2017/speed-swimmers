@@ -12,9 +12,10 @@ export const laneX = (i) => -(LANES * LANE_W) / 2 + LANE_W / 2 + i * LANE_W;
 
 const DASH_PERIOD = 12;
 const LAMP_PERIOD = 40;
-const LAMP_COUNT = 32; // per side
-const VIEW_AHEAD = 1300;
-const SKY_TILE = 800;
+const LAMP_COUNT = 68; // per side: covers the full view distance
+const VIEW_AHEAD = 2700; // matches the city's streamed distance
+const LAMP_ON = new THREE.Color(0xfff0d8).multiplyScalar(6);
+const LAMP_OFF = new THREE.Color(0x8a8d90);
 
 function roadTexture(renderer) {
   const ppm = 24;
@@ -24,10 +25,10 @@ function roadTexture(renderer) {
   c.width = w;
   c.height = h;
   const g = c.getContext('2d');
-  g.fillStyle = '#1b1d21';
+  g.fillStyle = '#383a3f';
   g.fillRect(0, 0, w, h);
   for (let i = 0; i < 4000; i++) {
-    const v = 20 + Math.random() * 22;
+    const v = 44 + Math.random() * 36;
     g.fillStyle = `rgb(${v},${v},${v + 3})`;
     g.fillRect(Math.random() * w, Math.random() * h, 2, 2);
   }
@@ -61,27 +62,6 @@ function radialTexture() {
   return new THREE.CanvasTexture(c);
 }
 
-function windowTexture() {
-  const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 128;
-  const g = c.getContext('2d');
-  g.fillStyle = '#0b0e16';
-  g.fillRect(0, 0, 64, 128);
-  for (let y = 4; y < 124; y += 8) {
-    for (let x = 4; x < 60; x += 8) {
-      if (Math.random() < 0.28) {
-        g.fillStyle = Math.random() < 0.85 ? '#ffc27a' : '#9fe8f5';
-        g.fillRect(x, y, 4, 5);
-      }
-    }
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.magFilter = THREE.NearestFilter;
-  return t;
-}
-
 function jerseyBarrier(length, side) {
   const s = new THREE.Shape();
   // Profile in (x outward, y up); side flips it to face the road.
@@ -111,38 +91,40 @@ export class World {
   constructor(scene, renderer) {
     this.scene = scene;
 
-    scene.background = new THREE.Color(0x05070d);
-    scene.fog = new THREE.FogExp2(0x070a12, 0.0019);
-    scene.add(new THREE.HemisphereLight(0x3a4a6a, 0x0a0a0c, 0.6));
-    const moon = new THREE.DirectionalLight(0x8090b0, 0.35);
-    moon.position.set(-30, 60, -20);
-    scene.add(moon);
-
+    // Sky, sun and fog live in lighting.js; surroundings in city.js.
     // Road: one long plane snapped to the dash period so markings stay world-fixed.
     const roadLen = VIEW_AHEAD + 300;
     const tex = roadTexture(renderer);
     tex.repeat.set(1, roadLen / DASH_PERIOD);
     this.road = new THREE.Mesh(
       new THREE.PlaneGeometry(ROAD_HALF * 2, roadLen).rotateX(-Math.PI / 2),
-      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.42, metalness: 0.15 }),
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, metalness: 0 }),
     );
     this.road.geometry.translate(0, 0, -roadLen / 2 + 250);
+    this.road.receiveShadow = true;
     scene.add(this.road);
-
-    this.ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(1200, roadLen).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x07080a }),
-    );
-    this.ground.geometry.translate(0, -0.6, -roadLen / 2 + 250);
-    scene.add(this.ground);
 
     this.barriers = new THREE.Group();
     this.barriers.add(jerseyBarrier(roadLen, -1), jerseyBarrier(roadLen, 1));
-    this.barriers.children.forEach((b) => (b.position.z = -roadLen / 2 + 250));
+    this.barriers.children.forEach((b) => {
+      b.position.z = -roadLen / 2 + 250;
+      b.castShadow = b.receiveShadow = true;
+    });
     scene.add(this.barriers);
 
     this.#buildLamps();
-    this.#buildSkyline();
+  }
+
+  // Asphalt brightness (<= 1 so white lane lines never cross the bloom threshold).
+  setRoadTone(k) {
+    this.road.material.color.setScalar(k);
+  }
+
+  // Streetlights on (dusk/night) or off (day): real lights, glowing heads and light pools.
+  setLamps(on) {
+    for (const l of this.lampLights) l.visible = on;
+    this.lampHeads.material.color.copy(on ? LAMP_ON : LAMP_OFF);
+    this.lampPools.visible = on;
   }
 
   #buildLamps() {
@@ -183,6 +165,9 @@ export class World {
     }
     this.lamps = new THREE.Group();
     this.lamps.add(poles, arms, heads, pools);
+    poles.castShadow = arms.castShadow = true;
+    this.lampHeads = heads;
+    this.lampPools = pools;
     this.scene.add(this.lamps);
 
     // A few real lights on the lamps nearest the player so cars pick up highlights.
@@ -197,44 +182,12 @@ export class World {
     }
   }
 
-  #buildSkyline() {
-    const rnd = mulberry(7);
-    const tiles = 3;
-    const perTile = 70;
-    const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
-    const winTex = windowTexture();
-    // Unlit: distant buildings only need their window texture, not lighting.
-    const mat = new THREE.MeshBasicMaterial({ map: winTex, color: new THREE.Color().setScalar(0.75) });
-    const mesh = new THREE.InstancedMesh(geo, mat, perTile * tiles);
-    const m = new THREE.Matrix4();
-    const items = [];
-    for (let i = 0; i < perTile; i++) {
-      const side = rnd() < 0.5 ? -1 : 1;
-      const x = side * (140 + rnd() * 420);
-      const z = rnd() * SKY_TILE;
-      const w = 18 + rnd() * 30;
-      const d = 18 + rnd() * 30;
-      const h = 25 + Math.pow(rnd(), 2) * 160;
-      items.push([x, z, w, h, d]);
-    }
-    let k = 0;
-    for (let t = 0; t < tiles; t++) {
-      for (const [x, z, w, h, d] of items) {
-        mesh.setMatrixAt(k++, m.makeScale(w, h, d).setPosition(x, -0.5, -z - t * SKY_TILE + SKY_TILE));
-      }
-    }
-    this.skyline = mesh;
-    this.scene.add(mesh);
-  }
-
   update(playerZ) {
     // Large geometry follows the player continuously (it is uniform along z).
     this.road.position.z = Math.floor(playerZ / DASH_PERIOD) * DASH_PERIOD;
-    this.ground.position.z = playerZ;
     this.barriers.position.z = playerZ;
     const lampBase = Math.floor(playerZ / LAMP_PERIOD) * LAMP_PERIOD;
     this.lamps.position.z = lampBase;
-    this.skyline.position.z = Math.floor(playerZ / SKY_TILE) * SKY_TILE;
 
     // Attach real lights to the lamps nearest a point just ahead of the player (no allocation).
     const local = playerZ - lampBase - 15;

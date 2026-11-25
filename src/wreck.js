@@ -52,6 +52,7 @@ class Rig {
       if (!geo) continue;
       const g = geo.clone();
       const mesh = new THREE.Mesh(g, layer === 'paint' ? this.paintMat : rigMats[layer]);
+      mesh.castShadow = mesh.receiveShadow = layer === 'paint' || layer === 'fixed';
       this.inner.add(mesh);
       this.layers.push({ mesh, original: geo.attributes.position.array });
     }

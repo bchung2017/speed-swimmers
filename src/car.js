@@ -293,6 +293,8 @@ export function buildTrafficFleet(scene, counts) {
       if (!geo) continue;
       const m = new THREE.InstancedMesh(geo, trafficMats[layer], count);
       m.frustumCulled = false; // instances span the whole highway
+      m.castShadow = layer === 'paint' || layer === 'fixed';
+      m.receiveShadow = true;
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       scene.add(m);
       meshes[layer] = m;

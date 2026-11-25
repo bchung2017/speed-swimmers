@@ -54,6 +54,10 @@ export class Player {
     head.position.set(0, 0.7, -2.0);
     head.target.position.set(0, 0, -30);
     this.root.add(head, head.target);
+    this.headlight = head;
+    this.group.traverse((o) => {
+      if (o.isMesh) o.castShadow = o.receiveShadow = true;
+    });
 
     // Red underglow pooled on the road around the car.
     const c = document.createElement('canvas');
@@ -84,6 +88,10 @@ export class Player {
     this._r = new THREE.Vector2();
     this._body = { x: 0, z: 0, vx: 0, vz: 0, w: 0, invM: this.invM, invI: this.invI };
     this.reset();
+  }
+
+  setHeadlights(on) {
+    this.headlight.visible = on;
   }
 
   reset() {

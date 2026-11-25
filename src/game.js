@@ -3,6 +3,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { City } from './city.js';
+import { Lighting } from './lighting.js';
 import { Player } from './player.js';
 import { Traffic } from './traffic.js';
 import { World } from './world.js';
@@ -17,6 +19,7 @@ const SLOW_FRAME = 1 / 50;
 const FAST_FRAME = 1 / 58;
 
 // Bloom: only HDR emissives (lights) exceed the threshold; lit paint stays below it.
+// Strength comes from the time-of-day preset (lighting.js).
 const BLOOM_STRENGTH = 0.4;
 const BLOOM_RADIUS = 0.3;
 const BLOOM_THRESHOLD = 1.0;
@@ -40,12 +43,14 @@ export class Game {
     this.scale = 1;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.95;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
     this.renderer = renderer;
 
     this.scene = new THREE.Scene();
-    // Far plane just past where fog fully hides geometry.
-    this.camera = new THREE.PerspectiveCamera(62, container.clientWidth / container.clientHeight, 0.5, 1400);
+    // Far plane covers the distant skyline (the sky dome is drawn at the far plane regardless).
+    this.camera = new THREE.PerspectiveCamera(62, container.clientWidth / container.clientHeight, 0.5, 3000);
 
     // MSAA matters less on high-DPI screens, where it is also most expensive.
     const samples = window.devicePixelRatio > 1 ? 2 : 4;
@@ -66,7 +71,9 @@ export class Game {
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
+    this.lighting = new Lighting(this.scene, renderer);
     this.world = new World(this.scene, renderer);
+    this.city = new City(this.scene);
     this.player = new Player(this.scene);
     this.wreckage = new Wreckage(this.scene);
     this.traffic = new Traffic(this.scene, this.wreckage);
@@ -88,9 +95,11 @@ export class Game {
     this.#resize();
 
     // Compile shaders up front (including the crash rigs) so the first frame and first crash don't stall.
+    this.timeOfDay = 'day';
+    this.setTimeOfDay('day');
     this.reset();
     this.wreckage.prewarm(true, new THREE.Vector3(this.player.x, 0, this.player.z - 12));
-    this.composer.render();
+    this.renderStill();
     this.wreckage.prewarm(false);
 
     renderer.setAnimationLoop((t) => this.#frame(t));
@@ -138,8 +147,27 @@ export class Game {
     }
   }
 
+  // Apply a lighting preset (see lighting.js) to everything that depends on it.
+  setTimeOfDay(name) {
+    this.timeOfDay = name;
+    const p = this.lighting.apply(name);
+    this.city.setNight(p.windows);
+    this.city.setWater(p.water);
+    this.world.setLamps(p.lamps);
+    this.world.setRoadTone(p.road);
+    this.player.setHeadlights(p.headlights);
+    this.bloom.strength = p.bloom;
+  }
+
+  // Render one frame without advancing the simulation (compiles shaders after lighting changes).
+  renderStill() {
+    this.lighting.update(this.camera, this.player.renderX, this.player.renderZ);
+    this.composer.render();
+  }
+
   reset() {
     this.player.reset();
+    this.city.update(this.player.z, 0);
     this.traffic.reset(this.player);
     this.camDir.set(0, -1);
     this.player.sync(0, 1);
@@ -176,7 +204,9 @@ export class Game {
     this.traffic.sync(alpha, this.player);
     this.wreckage.update(dt, this.player.z);
     this.world.update(this.player.renderZ);
+    this.city.update(this.player.renderZ, this.time);
     this.placeCamera(Math.min(1, dt * 5));
+    this.lighting.update(this.camera, this.player.renderX, this.player.renderZ);
     this.hud.speed(this.player.forwardSpeed * 3.6);
     this.composer.render();
   }
