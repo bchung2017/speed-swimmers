@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { buildTrafficFleet, TRAFFIC_COLORS } from './car.js';
 import { obbContact, resolveImpulse } from './physics.js';
 import { CENTRE_HEIGHT } from './wreck.js';
-import { LANES, LANE_W, ROAD_HALF, laneX, mulberry } from './world.js';
+import { MAX_TRAFFIC_WIDTH, PLAYER_WIDTH } from './car.js';
+import { LANES, LANE_W, ROAD_HALF, SQUEEZE_MARGIN, laneX, mulberry } from './world.js';
 
 const FLEET = { sedan: 38, suv: 18, truck: 8 };
 const AHEAD = 700; // traffic exists from player.z - AHEAD ...
@@ -21,6 +22,16 @@ const AIR_LIFT = 0.45;
 const AIR_MAX = 11;
 const LIFT_SCALE = { sedan: 1, suv: 0.8, truck: 0.35 };
 const GRAVITY = 9.8;
+
+// Lane lean: drivers don't sit dead-centre. Each type may lean far enough to cross LEAN_PAST_LINE
+// past where the player would be sitting on the lane line, so riding the line isn't safe.
+// Neighbours alongside share a budget so that the gap between them always fits the player plus
+// SQUEEZE_MARGIN; it just isn't always centred on the line.
+const LEAN_PAST_LINE = 0.15;
+const LEAN_RATE = 1.2; // m/s: how fast a driver can shift within the lane
+const LEAN_LOOKAHEAD = 20; // m beyond overlap at which neighbours start sharing the budget
+const SQUEEZE = PLAYER_WIDTH + SQUEEZE_MARGIN;
+const maxLean = (width) => (LANE_W - width) / 2 - PLAYER_WIDTH / 2 + LEAN_PAST_LINE;
 // Fractured rigs are staged on cars within this distance of the player, ready for an instant swap.
 const STAGE_RANGE = 70;
 const STAGE_MAX = 12;
@@ -76,6 +87,10 @@ export class Traffic {
           toLane: -1,
           laneT: 1,
           nextChange: 0,
+          skewBias: 0,
+          skewPhase: 0,
+          skewRate: 0,
+          skew: 0,
           offX: 0,
           offV: 0,
           braking: false,
@@ -105,6 +120,7 @@ export class Traffic {
       const j = Math.floor(this.rng() * (i + 1));
       [this.cars[i], this.cars[j]] = [this.cars[j], this.cars[i]];
     }
+    this.cars.forEach((c, i) => (c.order = i));
   }
 
   reset(player) {
@@ -148,6 +164,11 @@ export class Traffic {
     c.speed = c.cruise;
     c.nextChange = 4 + this.rng() * 14;
     c.braking = false;
+    // Where this driver sits in the lane: a fixed lean plus a slow wander (fractions of maxLean).
+    c.skewBias = (this.rng() * 2 - 1) * 0.75;
+    c.skewPhase = this.rng() * Math.PI * 2;
+    c.skewRate = (2 * Math.PI) / (6 + this.rng() * 10);
+    c.skew = 0;
   }
 
   #laneFree(lane, z, gap, list = this.cars) {
@@ -253,8 +274,37 @@ export class Traffic {
     // Lateral shove from light hits springs back to the lane.
     c.offV += (-6 * c.offX - 5 * c.offV) * dt;
     c.offX += c.offV * dt;
-    c.x = c.baseX + c.offX;
-    c.heading = -Math.atan2(laneRate + c.offV, c.speed + 0.01);
+    const skewRate = this.#lean(c, dt);
+    c.x = c.baseX + c.skew + c.offX;
+    c.heading = -Math.atan2(laneRate + skewRate + c.offV, c.speed + 0.01);
+  }
+
+  // Move c.skew toward the driver's preferred lean, limited by the shared budget with any neighbour
+  // alongside (or about to be). Of each pair, the car later in the list yields. Returns lateral rate.
+  #lean(c, dt) {
+    c.skewPhase += c.skewRate * dt;
+    const m = maxLean(c.width);
+    let want = m * (c.skewBias + 0.25 * Math.sin(c.skewPhase));
+    let hi = m; // most it may lean toward +x
+    let lo = -m; // most toward -x
+    if (c.laneT >= 1) {
+      for (const o of this.cars) {
+        if (o === c || o.wreck || o.laneT < 1) continue;
+        const dl = o.lane - c.lane;
+        if (dl !== 1 && dl !== -1) continue;
+        if (Math.abs(o.z - c.z) > (c.length + o.length) / 2 + LEAN_LOOKAHEAD) continue;
+        const slack = LANE_W - (c.width + o.width) / 2 - SQUEEZE;
+        // o leans toward c by -dl * o.skew; o keeps priority if it comes first.
+        const theirs = o.order < c.order ? Math.max(0, -dl * o.skew) : 0;
+        const allowed = Math.max(0, slack - theirs);
+        if (dl > 0) hi = Math.min(hi, allowed);
+        else lo = Math.max(lo, -allowed);
+      }
+    }
+    want = Math.min(hi, Math.max(lo, want));
+    const prev = c.skew;
+    c.skew += Math.sign(want - c.skew) * Math.min(Math.abs(want - c.skew), LEAN_RATE * dt);
+    return (c.skew - prev) / dt;
   }
 
   #updateWreck(c, dt) {

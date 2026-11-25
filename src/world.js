@@ -4,6 +4,7 @@ import { MAX_TRAFFIC_WIDTH, PLAYER_WIDTH } from './car.js';
 export const LANES = 5;
 // Widest vehicle + player + a small margin: two cars side by side in adjacent lanes always leave
 // a gap just wider than the player, so it can be threaded at speed with a straight wheel.
+// Traffic also leans within its lane (traffic.js) under a pair budget that preserves this gap.
 export const SQUEEZE_MARGIN = 0.25;
 export const LANE_W = MAX_TRAFFIC_WIDTH + PLAYER_WIDTH + SQUEEZE_MARGIN;
 const SHOULDER = 1.5;

@@ -54,6 +54,7 @@ npm run dev
 | Traffic mass, dent / wreck / airborne thresholds, launch height, rig staging range | constants at the top of `src/traffic.js` |
 | Dent depth, debris particle pool | constants at the top of `src/wreck.js` |
 | Lane width (derived: widest vehicle + player + `SQUEEZE_MARGIN`) | `src/world.js` |
+| How far traffic leans in its lane, neighbour budget, lean speed | `LEAN_*` constants in `src/traffic.js` |
 | Time-of-day colours, sun, fog, exposure | `PRESETS` in `src/lighting.js` |
 | District mix, block size, view distance, densities | `district()`, `SEG`, `ACTIVE`, `CAP` in `src/city.js` |
 
