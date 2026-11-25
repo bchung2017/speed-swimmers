@@ -8,6 +8,7 @@ const ENGINE = 11; // m/s^2 at standstill, tapers to 0 at MAX_SPEED
 const BRAKE = 22;
 const GRIP = 6; // lateral velocity decay rate (1/s)
 const STEER_RATE = 1.3; // rad/s at low speed
+const SIDES = [-1, 1];
 
 export class Player {
   constructor(scene) {
@@ -27,29 +28,35 @@ export class Player {
     head.target.position.set(0, 0, -30);
     this.body.add(head, head.target);
 
-    // Cyan glow pooled on the road under the rear.
+    // Red underglow pooled on the road around the car.
     const c = document.createElement('canvas');
     c.width = c.height = 64;
     const g = c.getContext('2d');
     const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-    grd.addColorStop(0, 'rgba(95,224,240,0.9)');
-    grd.addColorStop(1, 'rgba(95,224,240,0)');
+    grd.addColorStop(0, 'rgba(255,24,32,0.95)');
+    grd.addColorStop(0.55, 'rgba(255,24,32,0.45)');
+    grd.addColorStop(1, 'rgba(255,24,32,0)');
     g.fillStyle = grd;
     g.fillRect(0, 0, 64, 64);
     const glowPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.4, 1.6).rotateX(-Math.PI / 2),
+      new THREE.PlaneGeometry(3.4, 6.0).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({
         map: new THREE.CanvasTexture(c),
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        opacity: 0.35,
+        opacity: 0.55,
       }),
     );
-    glowPlane.position.set(0, 0.03, 2.2);
+    glowPlane.position.set(0, 0.03, 0);
     this.body.add(glowPlane);
 
+    // Scratch vectors, reused every step to avoid per-frame allocation.
     this.vel = new THREE.Vector2();
+    this._f = new THREE.Vector2();
+    this._r = new THREE.Vector2();
+    this._n = new THREE.Vector2();
+    this._axes = [new THREE.Vector2(1, 0), new THREE.Vector2(0, 1), this._f, this._r];
     this.reset();
   }
 
@@ -64,12 +71,13 @@ export class Player {
     this.accel = 0;
   }
 
+  // Note: both return a shared vector that is overwritten on the next call.
   get forward() {
-    return new THREE.Vector2(-Math.sin(this.heading), -Math.cos(this.heading));
+    return this._f.set(-Math.sin(this.heading), -Math.cos(this.heading));
   }
 
   get right() {
-    return new THREE.Vector2(Math.cos(this.heading), -Math.sin(this.heading));
+    return this._r.set(Math.cos(this.heading), -Math.sin(this.heading));
   }
 
   get forwardSpeed() {
@@ -125,7 +133,7 @@ export class Player {
   #barriers(dt) {
     const ex = this.#extentX();
     const limit = ROAD_HALF - 0.05;
-    for (const side of [-1, 1]) {
+    for (const side of SIDES) {
       const over = side * this.x + ex - limit;
       if (over <= 0) continue;
       this.x -= side * over;
@@ -142,8 +150,9 @@ export class Player {
   collide(cars) {
     const f = this.forward;
     const r = this.right;
-    const axes = [new THREE.Vector2(1, 0), new THREE.Vector2(0, 1), f, r];
-    const pa = [this.width / 2, this.length / 2];
+    const axes = this._axes;
+    const hw = this.width / 2;
+    const hl = this.length / 2;
 
     for (const c of cars) {
       const dx = this.x - c.x;
@@ -153,7 +162,7 @@ export class Player {
       let minOverlap = Infinity;
       let n = null;
       for (const a of axes) {
-        const rp = pa[0] * Math.abs(r.dot(a)) + pa[1] * Math.abs(f.dot(a));
+        const rp = hw * Math.abs(r.dot(a)) + hl * Math.abs(f.dot(a));
         const rc = (c.width / 2) * Math.abs(a.x) + (c.length / 2) * Math.abs(a.y);
         const d = dx * a.x + dz * a.y;
         const o = rp + rc - Math.abs(d);
@@ -163,7 +172,7 @@ export class Player {
         }
         if (o < minOverlap) {
           minOverlap = o;
-          n = a.clone().multiplyScalar(Math.sign(d) || 1);
+          n = this._n.copy(a).multiplyScalar(Math.sign(d) || 1);
         }
       }
       if (!n) continue;
@@ -194,7 +203,7 @@ export class Player {
     this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, -this.steer * Math.min(1, fwd / 40) * 0.05, 0.1);
     this.pitch = THREE.MathUtils.lerp(this.pitch, THREE.MathUtils.clamp(-this.accel * 0.004, -0.05, 0.03), 0.1);
     this.group.rotation.x = this.pitch;
-    this.tail.emissiveIntensity = this.accel < -3 ? 3 : 0.45;
+    this.tail.color.setScalar(this.accel < -3 ? 3 : 0.45);
     const roll = (fwd * dt) / 0.34;
     this.wheels.forEach((w, i) => {
       w.userData.spin.rotation.x -= roll;

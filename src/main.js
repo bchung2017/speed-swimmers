@@ -10,7 +10,13 @@ const hudEl = document.getElementById('hud');
 const speedEl = document.getElementById('speed');
 
 const input = new Input();
-const hud = { speed: (kmh) => (speedEl.textContent = Math.round(Math.abs(kmh))) };
+let shownSpeed = -1;
+const hud = {
+  speed(kmh) {
+    const v = Math.round(Math.abs(kmh));
+    if (v !== shownSpeed) speedEl.textContent = shownSpeed = v;
+  },
+};
 const game = new Game(document.getElementById('app'), input, hud);
 if (import.meta.env.DEV) window.game = game;
 

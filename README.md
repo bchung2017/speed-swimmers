@@ -29,13 +29,22 @@ npm run dev
 
 - `index.html` — page shell, HUD, main/pause/quit overlays
 - `src/main.js` — menu state machine (menu → playing ⇄ paused → quit)
-- `src/game.js` — renderer, bloom post-processing, fixed-step loop (120 Hz), chase camera
+- `src/game.js` — renderer, bloom post-processing, fixed-step loop (120 Hz), chase camera, dynamic resolution
 - `src/world.js` — endless highway: road, barriers, streetlights, skyline; recycled around the player
 - `src/player.js` — arcade car physics, barrier and traffic collisions
 - `src/traffic.js` — AI traffic: car-following, lane changes, recycling ahead/behind the player
-- `src/car.js` — procedural low-poly vehicles (player coupe, sedan, SUV, box truck)
+- `src/car.js` — procedural low-poly vehicles (player coupe, sedan, SUV, box truck), merged per material layer; traffic is instanced
 - `src/input.js` — arrow-key state
 - `src/style.css` — menu/HUD styling and palette tokens
 - `scripts/dev-sync.mjs` — dev server + auto-pull loop
+
+## Performance notes
+
+- Traffic is drawn with one `InstancedMesh` per vehicle type and material layer: the whole scene is ~30 draw calls.
+- Vehicle parts are merged into a few geometries with vertex colours; lights are unlit `MeshBasicMaterial` with HDR colours for bloom.
+- Only 4 real point lights (on the lamps nearest the player) plus the headlight spot; streetlight pools are additive decals.
+- Pixel ratio is capped at 1.5; render resolution drops (down to 60%) when frames run under ~50 fps and recovers when there is headroom.
+- Bloom runs at quarter resolution; MSAA is 2x on high-DPI screens, 4x otherwise.
+- No per-step allocations in the physics/traffic loop.
 
 In dev builds the `Game` instance is exposed as `window.game` for console debugging.

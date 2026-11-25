@@ -62,7 +62,7 @@ function windowTexture() {
   c.width = 64;
   c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#000';
+  g.fillStyle = '#0b0e16';
   g.fillRect(0, 0, 64, 128);
   for (let y = 4; y < 124; y += 8) {
     for (let x = 4; x < 60; x += 8) {
@@ -91,10 +91,13 @@ function jerseyBarrier(length, side) {
   s.closePath();
   const geo = new THREE.ExtrudeGeometry(s, { depth: length, bevelEnabled: false });
   geo.translate(0, 0, -length / 2);
-  if (side < 0) geo.scale(-1, 1, 1);
+  if (side < 0) geo.rotateY(Math.PI); // mirror in x without flipping winding (profile is uniform along z)
   const mesh = new THREE.Mesh(
     geo,
-    new THREE.MeshStandardMaterial({ color: 0x6d7076, roughness: 0.92, flatShading: true, side: THREE.DoubleSide }),
+    // Not flatShading: derivative-based normals on these km-long sliver faces collapse to NaN at
+    // grazing angles, and bloom spreads a single NaN pixel across the frame. The extruded
+    // geometry already carries per-face normals.
+    new THREE.MeshStandardMaterial({ color: 0x6d7076, roughness: 0.92 }),
   );
   mesh.position.x = side * ROAD_HALF;
   return mesh;
@@ -124,7 +127,7 @@ export class World {
 
     this.ground = new THREE.Mesh(
       new THREE.PlaneGeometry(1200, roadLen).rotateX(-Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0x0b0c0f, roughness: 1 }),
+      new THREE.MeshBasicMaterial({ color: 0x07080a }),
     );
     this.ground.geometry.translate(0, -0.6, -roadLen / 2 + 250);
     scene.add(this.ground);
@@ -145,7 +148,7 @@ export class World {
     const arms = new THREE.InstancedMesh(new THREE.BoxGeometry(2.6, 0.14, 0.14), poleMat, n);
     const heads = new THREE.InstancedMesh(
       new THREE.BoxGeometry(0.9, 0.18, 0.4),
-      new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xfff0d8, emissiveIntensity: 6 }),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0xfff0d8).multiplyScalar(6) }),
       n,
     );
     const pools = new THREE.InstancedMesh(
@@ -178,9 +181,12 @@ export class World {
     this.lamps.add(poles, arms, heads, pools);
     this.scene.add(this.lamps);
 
-    // A handful of real lights on the lamps nearest the player so cars pick up highlights.
+    // A few real lights on the lamps nearest the player so cars pick up highlights.
+    // Every light adds per-pixel cost to every lit material, so keep this small.
     this.lampLights = [];
-    for (let i = 0; i < 6; i++) {
+    this.nearest = new Int32Array(4);
+    this.nearestD = new Float64Array(4);
+    for (let i = 0; i < 4; i++) {
       const l = new THREE.PointLight(0xffe6c4, 140, 40, 1.6);
       this.lamps.add(l);
       this.lampLights.push(l);
@@ -193,14 +199,8 @@ export class World {
     const perTile = 70;
     const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
     const winTex = windowTexture();
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x0d1018,
-      roughness: 0.9,
-      emissive: 0xffffff,
-      emissiveMap: winTex,
-      emissiveIntensity: 0.55,
-      flatShading: true,
-    });
+    // Unlit: distant buildings only need their window texture, not lighting.
+    const mat = new THREE.MeshBasicMaterial({ map: winTex, color: new THREE.Color().setScalar(0.75) });
     const mesh = new THREE.InstancedMesh(geo, mat, perTile * tiles);
     const m = new THREE.Matrix4();
     const items = [];
@@ -232,12 +232,25 @@ export class World {
     this.lamps.position.z = lampBase;
     this.skyline.position.z = Math.floor(playerZ / SKY_TILE) * SKY_TILE;
 
-    // Attach real lights to the lamps nearest the player.
-    const local = playerZ - lampBase;
-    const sorted = this.lampOffsets
-      .map((p) => ({ p, d: Math.abs(p.z - local + 15) }))
-      .sort((a, b) => a.d - b.d);
-    for (let i = 0; i < this.lampLights.length; i++) this.lampLights[i].position.copy(sorted[i].p);
+    // Attach real lights to the lamps nearest a point just ahead of the player (no allocation).
+    const local = playerZ - lampBase - 15;
+    const idx = this.nearest;
+    const dist = this.nearestD.fill(Infinity);
+    for (let i = 0; i < this.lampOffsets.length; i++) {
+      const d = Math.abs(this.lampOffsets[i].z - local);
+      for (let k = 0; k < idx.length; k++) {
+        if (d < dist[k]) {
+          for (let m = idx.length - 1; m > k; m--) {
+            dist[m] = dist[m - 1];
+            idx[m] = idx[m - 1];
+          }
+          dist[k] = d;
+          idx[k] = i;
+          break;
+        }
+      }
+    }
+    for (let k = 0; k < idx.length; k++) this.lampLights[k].position.copy(this.lampOffsets[idx[k]]);
   }
 }
 
