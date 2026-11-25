@@ -10,6 +10,7 @@ const BRAKE = 22;
 const GRIP = 7; // lateral velocity decay rate (1/s)
 const STEER_RATE = 1.9; // rad/s at low speed
 const STEER_FALLOFF = 30; // speed (m/s) at which steering authority halves
+const STEER_ASSIST = 0.8; // rate (1/s) the heading self-centers toward the road when not steering
 const SIDES = [-1, 1];
 
 // Crashes at or above this closing speed (m/s, ~58 km/h) reduce control for a short time.
@@ -172,7 +173,7 @@ export class Player {
     // Gentle self-centering toward the road direction when cruising roughly straight. Only near
     // straight and only at speed: it must never swing a spun-out or stopped car around.
     if (!crashed && input.steer === 0 && fwd > 5 && Math.abs(this.heading) < 0.5) {
-      this.heading -= this.heading * Math.min(1, 0.8 * dt * Math.min(1, fwd / 20));
+      this.heading -= this.heading * Math.min(1, STEER_ASSIST * dt * Math.min(1, fwd / 20));
     }
     this.heading = wrapAngle(this.heading);
 
