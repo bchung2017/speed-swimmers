@@ -74,12 +74,14 @@ class Builder {
   }
 
   // Tyre, dark rim barrel, and on both faces a rim lip, five spokes and a hub.
-  wheel(layer, r, w, x, z, rimColor) {
+  // detailed = false (traffic): tyre, barrel and hub only — spokes on 64 cars cost ~90k triangles.
+  wheel(layer, r, w, x, z, rimColor, detailed = true) {
     tmpM.compose(tmpP.set(x, r, z), tmpQ.identity(), tmpS.set(w, r, r));
     const m = tmpM.clone();
     this.add(layer, tireGeo, 0x151515, m);
     this.add(layer, barrelGeo, 0x101113, m);
     this.add(layer, hubGeo, rimColor, m);
+    if (!detailed) return;
     const spokeLen = 0.62 * r;
     for (const face of [-1, 1]) {
       const fx = x + face * (w / 2 + 0.005);
@@ -146,6 +148,12 @@ function wheelPositions(p) {
 
 // ---------- Player car: deep-blue 90s sport coupe, red-tinted glass, silver 5-spokes, red underglow ----------
 
+// Collision widths. Lane width is derived from these (see world.js) so that two vehicles side by
+// side in adjacent lanes always leave a gap just wider than the player car.
+export const PLAYER_WIDTH = 1.78;
+export const TRUCK_WIDTH = 2.35;
+export const MAX_TRAFFIC_WIDTH = TRUCK_WIDTH;
+
 const playerBodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.45, metalness: 0.3 });
 const playerFixedMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.8, metalness: 0 });
 const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
@@ -153,7 +161,7 @@ const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
 export function buildPlayerCar() {
   const p = {
     L: 4.45,
-    W: 1.78,
+    W: PLAYER_WIDTH,
     hood: 0.86,
     deck: 0.95,
     roof: 1.3,
@@ -177,10 +185,10 @@ export function buildPlayerCar() {
 
   // Front: cyan headlight elements, amber outboard corners and side markers, cyan fog lights, grille.
   for (const s of [-1, 1]) {
-    b.glow(0x5fe0f0, 4, 0.3, 0.08, 0.05, s * (hw - 0.42), 0.68, -hl + 0.1);
-    b.glow(0xffa030, 2.5, 0.12, 0.08, 0.05, s * (hw - 0.17), 0.66, -hl + 0.12);
-    b.glow(0xffa030, 2, 0.03, 0.05, 0.16, s * (hw + 0.005), 0.5, -hl + 0.45);
-    b.glow(0x5fe0f0, 3, 0.18, 0.08, 0.04, s * (hw - 0.4), 0.35, -hl - 0.01);
+    b.glow(0x5fe0f0, 2.2, 0.3, 0.08, 0.05, s * (hw - 0.42), 0.68, -hl + 0.1);
+    b.glow(0xffa030, 1.6, 0.12, 0.08, 0.05, s * (hw - 0.17), 0.66, -hl + 0.12);
+    b.glow(0xffa030, 1.4, 0.03, 0.05, 0.16, s * (hw + 0.005), 0.5, -hl + 0.45);
+    b.glow(0x5fe0f0, 1.8, 0.18, 0.08, 0.04, s * (hw - 0.4), 0.35, -hl - 0.01);
   }
   b.box('fixed', 0x0a0b0d, p.W - 0.7, 0.14, 0.03, 0, 0.36, -hl - 0.005);
 
@@ -197,9 +205,9 @@ export function buildPlayerCar() {
   b.add('fixed', tubeGeo, DARK_RIM, tmpM);
 
   // Red neon underglow strips: side skirts, front lip, rear.
-  for (const s of [-1, 1]) b.glow(0xff1020, 4, 0.04, 0.03, p.L - 1.4, s * (hw - 0.02), 0.2, 0.05);
-  b.glow(0xff1020, 4, p.W - 0.3, 0.03, 0.04, 0, 0.22, -hl + 0.05);
-  b.glow(0xff1020, 3, p.W - 0.4, 0.03, 0.04, 0, 0.26, hl - 0.05);
+  for (const s of [-1, 1]) b.glow(0xff1020, 2.2, 0.04, 0.03, p.L - 1.4, s * (hw - 0.02), 0.2, 0.05);
+  b.glow(0xff1020, 2.2, p.W - 0.3, 0.03, 0.04, 0, 0.22, -hl + 0.05);
+  b.glow(0xff1020, 1.8, p.W - 0.4, 0.03, 0.04, 0, 0.26, hl - 0.05);
 
   const layers = b.build();
   const group = new THREE.Group();
@@ -235,40 +243,40 @@ const TYPES = {
   suv: { L: 4.85, W: 1.95, hood: 1.1, deck: 1.35, roof: 1.78, cabin: [-1.0, -0.4, 2.0, 2.3], wheelR: 0.38 },
 };
 
-function trafficGeometry(type) {
+export function trafficGeometry(type) {
   const b = new Builder();
   if (type === 'truck') {
     const L = 8.2;
-    const W = 2.45;
+    const W = TRUCK_WIDTH;
     const hl = L / 2;
     b.box('paint', 0xffffff, W - 0.1, 1.9, 2.0, 0, 1.35, -hl + 1.0);
     b.box('fixed', 0x0c1118, W - 0.16, 0.7, 0.05, 0, 1.85, -hl - 0.01);
     b.box('fixed', 0xc8c8c4, W, 2.9, 6.0, 0, 2.05, hl - 3.0);
     b.box('fixed', 0x222222, W - 0.2, 0.3, L - 0.2, 0, 0.55, 0);
     for (const [s, z] of [[-1, -hl + 1.2], [1, -hl + 1.2], [-1, hl - 1.4], [1, hl - 1.4]]) {
-      b.wheel('fixed', 0.48, 0.3, s * (W / 2 - 0.2), z, DARK_RIM);
+      b.wheel('fixed', 0.48, 0.3, s * (W / 2 - 0.2), z, DARK_RIM, false);
     }
     for (const s of [-1, 1]) {
       b.box('tail', 0xff1a10, 0.25, 0.25, 0.04, s * (W / 2 - 0.2), 0.9, hl + 0.01);
-      b.glow(0xfff2dd, 2, 0.3, 0.15, 0.04, s * (W / 2 - 0.3), 0.8, -hl - 0.01);
+      b.glow(0xfff2dd, 1.4, 0.3, 0.15, 0.04, s * (W / 2 - 0.3), 0.8, -hl - 0.01);
     }
-    b.glow(0xffa030, 2, W - 0.3, 0.05, 0.04, 0, 3.45, hl + 0.01);
+    b.glow(0xffa030, 1.3, W - 0.3, 0.05, 0.04, 0, 3.45, hl + 0.01);
     return { layers: b.build(), length: L, width: W };
   }
   const p = { ...TYPES[type], paint: 0xffffff };
   const hl = p.L / 2;
   const hw = p.W / 2;
   passengerBody(b, p);
-  for (const [x, z] of wheelPositions(p)) b.wheel('fixed', p.wheelR ?? 0.34, 0.25, x, z, DARK_RIM);
+  for (const [x, z] of wheelPositions(p)) b.wheel('fixed', p.wheelR ?? 0.34, 0.25, x, z, DARK_RIM, false);
   const ty = p.deck - 0.14;
   for (const s of [-1, 1]) {
     b.box('tail', 0xff1a10, 0.42, 0.09, 0.04, s * (hw - 0.32), ty, hl + 0.005);
-    b.glow(0xfff2dd, 2, 0.36, 0.09, 0.04, s * (hw - 0.3), p.hood - 0.18, -hl - 0.005);
+    b.glow(0xfff2dd, 1.4, 0.36, 0.09, 0.04, s * (hw - 0.3), p.hood - 0.18, -hl - 0.005);
   }
   return { layers: b.build(), length: p.L, width: p.W };
 }
 
-const trafficMats = {
+export const trafficMats = {
   paint: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.5, metalness: 0.25 }),
   fixed: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6, metalness: 0.2 }),
   glow: glowMat,

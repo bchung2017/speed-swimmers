@@ -31,12 +31,26 @@ npm run dev
 - `src/main.js` — menu state machine (menu → playing ⇄ paused → quit)
 - `src/game.js` — renderer, bloom post-processing, fixed-step loop (120 Hz), chase camera, dynamic resolution
 - `src/world.js` — endless highway: road, barriers, streetlights, skyline; recycled around the player
-- `src/player.js` — arcade car physics, barrier and traffic collisions
-- `src/traffic.js` — AI traffic: car-following, lane changes, recycling ahead/behind the player
+- `src/player.js` — arcade car physics, crash lockout (loss of control), barrier collisions
+- `src/traffic.js` — AI traffic: car-following, lane changes, light-hit nudges, sliding wrecks, player collisions
+- `src/physics.js` — oriented-box contact (SAT) and rigid-body impulse with spin and friction
+- `src/wreck.js` — pre-fractured vehicle rigs staged near the player, dents, flying chunks and shards
 - `src/car.js` — procedural low-poly vehicles (player coupe, sedan, SUV, box truck), merged per material layer; traffic is instanced
 - `src/input.js` — arrow-key state
 - `src/style.css` — menu/HUD styling and palette tokens
 - `scripts/dev-sync.mjs` — dev server + auto-pull loop
+
+## Tuning
+
+| What | Where |
+|---|---|
+| Chase camera distance / height / look-ahead | `CAM_*` constants at the top of `src/game.js` |
+| Bloom strength, threshold, per-pixel cap | `BLOOM_*` constants at the top of `src/game.js` |
+| Steering, grip, engine, brakes | constants at the top of `src/player.js` |
+| Crash severity for loss of control (m/s closing speed) | `LOSS_OF_CONTROL` in `src/player.js` |
+| Traffic mass, dent / wreck thresholds, rig staging range | constants at the top of `src/traffic.js` |
+| Debris amount, chunk grid, shard pool | constants at the top of `src/wreck.js` |
+| Lane width (derived: widest vehicle + player + `SQUEEZE_MARGIN`) | `src/world.js` |
 
 ## Performance notes
 

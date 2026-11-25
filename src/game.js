@@ -6,6 +6,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Player } from './player.js';
 import { Traffic } from './traffic.js';
 import { World } from './world.js';
+import { Wreckage } from './wreck.js';
 
 const STEP = 1 / 120;
 // Retina panels at full devicePixelRatio cost 4x the pixels of 1x; cap it.
@@ -14,6 +15,20 @@ const MAX_PIXEL_RATIO = 1.5;
 const MIN_SCALE = 0.6;
 const SLOW_FRAME = 1 / 50;
 const FAST_FRAME = 1 / 58;
+
+// Bloom: only HDR emissives (lights) exceed the threshold; lit paint stays below it.
+const BLOOM_STRENGTH = 0.4;
+const BLOOM_RADIUS = 0.3;
+const BLOOM_THRESHOLD = 1.0;
+// Cap on per-pixel brightness fed into bloom, so no single light can flood the frame.
+const BLOOM_MAX = 3.0;
+
+// Chase camera (metres).
+const CAM_DISTANCE = 4.5;
+const CAM_DISTANCE_PER_MS = 0.012; // extra distance per m/s of speed
+const CAM_HEIGHT = 3;
+const CAM_LOOK_AHEAD = 6;
+const CAM_LOOK_HEIGHT = 0.9;
 
 export class Game {
   constructor(container, input, hud) {
@@ -37,7 +52,14 @@ export class Game {
     const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples });
     this.composer = new EffectComposer(renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.4, 0.9);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD);
+    // Clamp what enters the bloom chain (also turns any stray Inf into a finite value).
+    const hp = this.bloom.materialHighPassFilter;
+    hp.fragmentShader = hp.fragmentShader.replace(
+      'gl_FragColor = mix( outputColor, texel, alpha );',
+      `gl_FragColor = mix( outputColor, vec4( min( texel.rgb, vec3( ${BLOOM_MAX.toFixed(2)} ) ), texel.a ), alpha );`,
+    );
+    hp.needsUpdate = true;
     // Run the bloom mip chain at half the usual resolution; it is a blur, so this is not visible.
     const bloomSetSize = this.bloom.setSize.bind(this.bloom);
     this.bloom.setSize = (w, h) => bloomSetSize(Math.max(1, w / 2), Math.max(1, h / 2));
@@ -46,27 +68,32 @@ export class Game {
 
     this.world = new World(this.scene, renderer);
     this.player = new Player(this.scene);
-    this.traffic = new Traffic(this.scene);
+    this.wreckage = new Wreckage(this.scene);
+    this.traffic = new Traffic(this.scene, this.wreckage);
 
     this.camDir = new THREE.Vector2(0, -1);
-    this.camPos = new THREE.Vector3();
+    this.carDir = new THREE.Vector2();
     this.lookAt = new THREE.Vector3();
     this.running = false;
     this.acc = 0;
+    this.time = 0;
     this.timer = new THREE.Timer();
     this.perfTime = 0;
     this.perfFrames = 0;
     this.fastWindows = 0;
+    this.slowWindows = 0;
 
     this.container = container;
     window.addEventListener('resize', () => this.#resize());
     this.#resize();
 
-    // Compile shaders up front so the first gameplay frame doesn't stall.
+    // Compile shaders up front (including the crash rigs) so the first frame and first crash don't stall.
     this.reset();
+    this.wreckage.prewarm(true, new THREE.Vector3(this.player.x, 0, this.player.z - 12));
     this.composer.render();
+    this.wreckage.prewarm(false);
 
-    renderer.setAnimationLoop(() => this.#frame());
+    renderer.setAnimationLoop((t) => this.#frame(t));
   }
 
   #resize() {
@@ -82,6 +109,8 @@ export class Game {
   }
 
   // Every half second, step render resolution down if frames are slow, back up if there is headroom.
+  // Asymmetric hysteresis (1 s to drop, 5 s to raise) so it doesn't oscillate: each resize reallocates
+  // render targets and costs a frame.
   #adaptResolution(dt) {
     this.perfTime += dt;
     this.perfFrames++;
@@ -91,11 +120,17 @@ export class Game {
     this.perfFrames = 0;
     let next = this.scale;
     if (avg > SLOW_FRAME) {
-      next = Math.max(MIN_SCALE, this.scale - 0.1);
       this.fastWindows = 0;
-    } else if (avg < FAST_FRAME && ++this.fastWindows >= 4) {
-      next = Math.min(1, this.scale + 0.05);
-      this.fastWindows = 0;
+      if (++this.slowWindows >= 2) {
+        next = Math.max(MIN_SCALE, this.scale - 0.1);
+        this.slowWindows = 0;
+      }
+    } else {
+      this.slowWindows = 0;
+      if (avg < FAST_FRAME && ++this.fastWindows >= 10) {
+        next = Math.min(1, this.scale + 0.05);
+        this.fastWindows = 0;
+      }
     }
     if (next !== this.scale) {
       this.scale = next;
@@ -107,6 +142,7 @@ export class Game {
     this.player.reset();
     this.traffic.reset(this.player);
     this.camDir.set(0, -1);
+    this.player.sync(0, 1);
     this.placeCamera(1);
   }
 
@@ -116,21 +152,30 @@ export class Game {
     this.acc = 0;
   }
 
-  #frame() {
+  step() {
+    this.player.update(STEP, this.input);
+    this.traffic.update(STEP, this.player);
+    const severity = this.traffic.collide(this.player);
+    if (severity > 0) this.player.hit(severity);
+  }
+
+  #frame(t) {
     if (!this.running) return;
-    this.timer.update();
+    this.timer.update(t);
     const dt = Math.min(this.timer.getDelta(), 0.1);
+    this.time += dt;
     this.acc += dt;
     while (this.acc >= STEP) {
-      this.player.update(STEP, this.input);
-      this.traffic.update(STEP, this.player);
-      this.player.collide(this.traffic.cars);
+      this.step();
       this.acc -= STEP;
     }
+    // Render between the last two physics states so motion is smooth at any frame rate.
+    const alpha = this.acc / STEP;
     this.#adaptResolution(dt);
-    this.player.sync(dt);
-    this.traffic.sync();
-    this.world.update(this.player.z);
+    this.player.sync(dt, alpha);
+    this.traffic.sync(alpha, this.player);
+    this.wreckage.update(dt, this.player.z);
+    this.world.update(this.player.renderZ);
     this.placeCamera(Math.min(1, dt * 5));
     this.hud.speed(this.player.forwardSpeed * 3.6);
     this.composer.render();
@@ -138,20 +183,23 @@ export class Game {
 
   placeCamera(k) {
     const p = this.player;
-    // Camera trails the car's heading with lag, so slides read on screen.
-    const f = p.forward;
-    this.camDir.lerp(f, k * 0.6).normalize();
+    // Only the camera's direction is smoothed (so slides and spins read on screen); its position is
+    // locked to the car. Chasing the car's position with a lerp lags metres behind at speed, and
+    // that lag changes with every frame-time wobble, which reads as jitter.
+    this.carDir.set(-Math.sin(p.renderHeading), -Math.cos(p.renderHeading));
+    this.camDir.lerp(this.carDir, k * 0.6).normalize();
     const speed = Math.abs(p.forwardSpeed);
-    const dist = 4.5 + speed * 0.012;
-    const shake = p.impact * 0.25 + Math.max(0, speed - 50) * 0.0012;
-    const defaultHeight = 3;
-    this.camPos.set(
-      p.x - this.camDir.x * dist + (Math.random() - 0.5) * shake,
-      defaultHeight + (Math.random() - 0.5) * shake,
-      p.z - this.camDir.y * dist,
+    const dist = CAM_DISTANCE + speed * CAM_DISTANCE_PER_MS;
+    // Shake only on impact, as a smooth wobble rather than per-frame noise.
+    const shake = p.impact * 0.3;
+    const sx = Math.sin(this.time * 41) * shake;
+    const sy = Math.sin(this.time * 53 + 1) * shake;
+    this.camera.position.set(p.renderX - this.camDir.x * dist + sx, CAM_HEIGHT + sy, p.renderZ - this.camDir.y * dist);
+    this.lookAt.set(
+      p.renderX + this.camDir.x * CAM_LOOK_AHEAD,
+      CAM_LOOK_HEIGHT,
+      p.renderZ + this.camDir.y * CAM_LOOK_AHEAD,
     );
-    this.camera.position.lerp(this.camPos, k === 1 ? 1 : Math.min(1, k * 3));
-    this.lookAt.set(p.x + this.camDir.x * 6, 0.9, p.z + this.camDir.y * 6);
     this.camera.lookAt(this.lookAt);
     const fov = 62 + Math.min(16, speed * 0.17);
     if (Math.abs(this.camera.fov - fov) > 0.01) {

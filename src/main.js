@@ -18,7 +18,10 @@ const hud = {
   },
 };
 const game = new Game(document.getElementById('app'), input, hud);
-if (import.meta.env.DEV) window.game = game;
+if (import.meta.env.DEV) {
+  window.game = game;
+  import('./world.js').then((w) => (window.__world = w));
+}
 
 let state = 'menu';
 

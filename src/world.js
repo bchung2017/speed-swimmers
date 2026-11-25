@@ -1,7 +1,11 @@
 import * as THREE from 'three';
+import { MAX_TRAFFIC_WIDTH, PLAYER_WIDTH } from './car.js';
 
 export const LANES = 5;
-export const LANE_W = 3.7;
+// Widest vehicle + player + a small margin: two cars side by side in adjacent lanes always leave
+// a gap just wider than the player, so it can be threaded at speed with a straight wheel.
+export const SQUEEZE_MARGIN = 0.25;
+export const LANE_W = MAX_TRAFFIC_WIDTH + PLAYER_WIDTH + SQUEEZE_MARGIN;
 const SHOULDER = 1.5;
 export const ROAD_HALF = (LANES * LANE_W) / 2 + SHOULDER; // inner face of barriers
 export const laneX = (i) => -(LANES * LANE_W) / 2 + LANE_W / 2 + i * LANE_W;

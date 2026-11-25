@@ -6,9 +6,18 @@ const MAX_SPEED = 100; // engine cutoff; drag limits top speed to ~295 km/h
 const MAX_REVERSE = 9;
 const ENGINE = 11; // m/s^2 at standstill, tapers to 0 at MAX_SPEED
 const BRAKE = 22;
-const GRIP = 6; // lateral velocity decay rate (1/s)
-const STEER_RATE = 1.3; // rad/s at low speed
+const GRIP = 7; // lateral velocity decay rate (1/s)
+const STEER_RATE = 1.9; // rad/s at low speed
+const STEER_FALLOFF = 30; // speed (m/s) at which steering authority halves
 const SIDES = [-1, 1];
+
+// Losing control: crashes at or above this closing speed (m/s, ~58 km/h) take the wheel away.
+// Below it, bumps and scrapes only push the car around.
+export const LOSS_OF_CONTROL = 16;
+const CRASH_GRIP = 0.8; // sideways grip while out of control: the car slides on its momentum
+const CRASH_SCRUB = 4; // m/s^2 of tyre scrub while sliding
+
+const NO_INPUT = { throttle: 0, brake: 0, steer: 0 };
 
 export class Player {
   constructor(scene) {
@@ -18,15 +27,19 @@ export class Player {
     this.tail = v.tail;
     this.length = v.length;
     this.width = v.width;
-    this.body = new THREE.Group();
-    this.body.add(this.group);
-    scene.add(this.body);
+    this.invM = 1;
+    this.invI = 12 / (this.length ** 2 + this.width ** 2);
+    this.root = new THREE.Group();
+    this.root.add(this.group);
+    scene.add(this.root);
 
-    // Headlight cone.
-    const head = new THREE.SpotLight(0xdff6ff, 350, 110, 0.4, 0.5, 1.4);
+    // Headlight cone. No distance falloff (decay 0, range-limited instead): with inverse-square
+    // falloff, anything right in front of the bumper (e.g. a barrier during a spin) blows out to a
+    // white blob. Intensity matches what the road received at ~30 m under the old falloff.
+    const head = new THREE.SpotLight(0xdff6ff, 3.5, 110, 0.4, 0.5, 0);
     head.position.set(0, 0.7, -2.0);
     head.target.position.set(0, 0, -30);
-    this.body.add(head, head.target);
+    this.root.add(head, head.target);
 
     // Red underglow pooled on the road around the car.
     const c = document.createElement('canvas');
@@ -45,18 +58,17 @@ export class Player {
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        opacity: 0.55,
+        opacity: 0.45,
       }),
     );
     glowPlane.position.set(0, 0.03, 0);
-    this.body.add(glowPlane);
+    this.root.add(glowPlane);
 
     // Scratch vectors, reused every step to avoid per-frame allocation.
     this.vel = new THREE.Vector2();
     this._f = new THREE.Vector2();
     this._r = new THREE.Vector2();
-    this._n = new THREE.Vector2();
-    this._axes = [new THREE.Vector2(1, 0), new THREE.Vector2(0, 1), this._f, this._r];
+    this._body = { x: 0, z: 0, vx: 0, vz: 0, w: 0, invM: this.invM, invI: this.invI };
     this.reset();
   }
 
@@ -64,9 +76,17 @@ export class Player {
     this.x = laneX(2);
     this.z = 0;
     this.heading = 0;
+    this.prevX = this.x;
+    this.prevZ = this.z;
+    this.prevHeading = 0;
+    this.renderX = this.x;
+    this.renderZ = this.z;
+    this.renderHeading = 0;
     this.steer = 0;
+    this.spin = 0; // yaw rate from collisions (rad/s), on top of steering
     this.vel.set(0, -27);
     this.impact = 0;
+    this.lockout = 0;
     this.pitch = 0;
     this.accel = 0;
   }
@@ -84,7 +104,19 @@ export class Player {
     return this.vel.dot(this.forward);
   }
 
-  update(dt, input) {
+  get outOfControl() {
+    return this.lockout > 0;
+  }
+
+  update(dt, rawInput) {
+    this.prevX = this.x;
+    this.prevZ = this.z;
+    this.prevHeading = this.heading;
+
+    const crashed = this.lockout > 0;
+    const input = crashed ? NO_INPUT : rawInput;
+    if (crashed) this.lockout = Math.max(0, this.lockout - dt);
+
     const f = this.forward;
     const r = this.right;
     let fwd = this.vel.dot(f);
@@ -92,25 +124,26 @@ export class Player {
 
     // Steering input smoothing.
     const s = input.steer;
-    const rate = s !== 0 && Math.sign(s) !== Math.sign(this.steer) ? 8 : 4;
+    const rate = s !== 0 && Math.sign(s) !== Math.sign(this.steer) ? 10 : 6;
     this.steer += THREE.MathUtils.clamp(s - this.steer, -rate * dt, rate * dt);
 
     // Longitudinal.
     let accel = 0;
     if (input.throttle) accel += fwd >= 0 ? ENGINE * (1 - fwd / MAX_SPEED) : BRAKE;
     if (input.brake) accel -= fwd > 0.5 ? BRAKE : fwd > -MAX_REVERSE ? ENGINE * 0.5 : 0;
-    accel -= Math.sign(fwd) * (0.6 + 0.0002 * fwd * fwd); // rolling + air drag
+    accel -= Math.sign(fwd) * (0.6 + 0.0002 * fwd * fwd + (crashed ? CRASH_SCRUB : 0)); // rolling + air drag
     if (!input.throttle && !input.brake && Math.abs(fwd) < 0.3) fwd = 0;
     fwd += accel * dt;
 
-    // Yaw: full authority at low speed, softer at high speed.
-    const auth = Math.min(1, Math.abs(fwd) / 5) / (1 + Math.abs(fwd) / 18);
-    this.heading += this.steer * STEER_RATE * auth * Math.sign(fwd || 1) * dt;
+    // Yaw: steering (full authority at low speed, softer at high speed) plus collision spin.
+    const auth = Math.min(1, Math.abs(fwd) / 5) / (1 + Math.abs(fwd) / STEER_FALLOFF);
+    this.heading += (this.steer * STEER_RATE * auth * Math.sign(fwd || 1) + this.spin) * dt;
+    this.spin *= Math.exp(-(crashed ? 0.7 : 6) * dt);
     // Gentle self-centering toward the road direction when not steering.
-    if (s === 0 && fwd > 5) this.heading -= this.heading * Math.min(1, 0.8 * dt);
+    if (!crashed && s === 0 && fwd > 5) this.heading -= this.heading * Math.min(1, 0.8 * dt);
 
     // Grip: bleed off sideways velocity (this is what gives the slide).
-    lat *= Math.exp(-GRIP * dt);
+    lat *= Math.exp(-(crashed ? CRASH_GRIP : GRIP) * dt);
 
     const nf = this.forward;
     const nr = this.right;
@@ -121,6 +154,40 @@ export class Player {
     this.accel = accel;
     this.#barriers(dt);
     this.impact = Math.max(0, this.impact - dt * 2);
+  }
+
+  // Called with the crash severity (closing speed, m/s) after a collision step.
+  hit(severity) {
+    this.impact = Math.max(this.impact, Math.min(1, severity / 25));
+    if (severity >= LOSS_OF_CONTROL) {
+      // Bigger crash, longer without control: 1 s at the threshold up to 3.5 s.
+      this.lockout = Math.max(this.lockout, Math.min(3.5, 1 + (severity - LOSS_OF_CONTROL) / 12));
+      this.steer = 0;
+    }
+  }
+
+  obb(out) {
+    out.x = this.x;
+    out.z = this.z;
+    out.h = this.heading;
+    out.hw = this.width / 2;
+    out.hl = this.length / 2;
+    return out;
+  }
+
+  body() {
+    const b = this._body;
+    b.x = this.x;
+    b.z = this.z;
+    b.vx = this.vel.x;
+    b.vz = this.vel.y;
+    b.w = this.spin;
+    return b;
+  }
+
+  setBody(b) {
+    this.vel.set(b.vx, b.vz);
+    this.spin = b.w;
   }
 
   // Half extent of the rotated car along world x.
@@ -142,68 +209,24 @@ export class Player {
         this.vel.x = -this.vel.x * 0.25;
       }
       this.vel.multiplyScalar(Math.exp(-1.2 * dt)); // scrape
-      this.heading *= Math.exp(-6 * dt); // align with the wall
+      this.spin *= Math.exp(-4 * dt);
+      if (!this.outOfControl) this.heading *= Math.exp(-6 * dt); // align with the wall
     }
   }
 
-  // Resolve overlaps with traffic (rectangles in the x/z plane).
-  collide(cars) {
-    const f = this.forward;
-    const r = this.right;
-    const axes = this._axes;
-    const hw = this.width / 2;
-    const hl = this.length / 2;
-
-    for (const c of cars) {
-      const dx = this.x - c.x;
-      const dz = this.z - c.z;
-      if (Math.abs(dz) > 12 || Math.abs(dx) > 6) continue;
-
-      let minOverlap = Infinity;
-      let n = null;
-      for (const a of axes) {
-        const rp = hw * Math.abs(r.dot(a)) + hl * Math.abs(f.dot(a));
-        const rc = (c.width / 2) * Math.abs(a.x) + (c.length / 2) * Math.abs(a.y);
-        const d = dx * a.x + dz * a.y;
-        const o = rp + rc - Math.abs(d);
-        if (o <= 0) {
-          n = null;
-          break;
-        }
-        if (o < minOverlap) {
-          minOverlap = o;
-          n = this._n.copy(a).multiplyScalar(Math.sign(d) || 1);
-        }
-      }
-      if (!n) continue;
-
-      this.x += n.x * minOverlap;
-      this.z += n.y * minOverlap;
-
-      // Relative velocity along the contact normal; traffic moves along -z at c.speed.
-      const rvx = this.vel.x;
-      const rvz = this.vel.y + c.speed;
-      const vn = rvx * n.x + rvz * n.y;
-      if (vn >= 0) continue;
-      const share = c.type === 'truck' ? 0.9 : 0.55; // how much of the impulse the player takes
-      const j = -(1 + 0.3) * vn;
-      this.vel.x += n.x * j * share;
-      this.vel.y += n.y * j * share;
-      c.speed = Math.max(0, c.speed + n.y * j * (1 - share));
-      this.heading += (n.x * Math.sign(-this.vel.y) * 0.04 + (Math.random() - 0.5) * 0.06) * Math.min(1, -vn / 10);
-      this.impact = Math.max(this.impact, Math.min(1, -vn / 20));
-    }
-  }
-
-  sync(dt) {
-    this.body.position.set(this.x, 0, this.z);
-    this.body.rotation.y = this.heading;
+  // Interpolate between the last two physics steps for smooth rendering.
+  sync(dt, alpha) {
+    this.renderX = this.prevX + (this.x - this.prevX) * alpha;
+    this.renderZ = this.prevZ + (this.z - this.prevZ) * alpha;
+    this.renderHeading = this.prevHeading + (this.heading - this.prevHeading) * alpha;
+    this.root.position.set(this.renderX, 0, this.renderZ);
+    this.root.rotation.y = this.renderHeading;
     // Body roll and pitch for weight transfer.
     const fwd = this.forwardSpeed;
     this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, -this.steer * Math.min(1, fwd / 40) * 0.05, 0.1);
     this.pitch = THREE.MathUtils.lerp(this.pitch, THREE.MathUtils.clamp(-this.accel * 0.004, -0.05, 0.03), 0.1);
     this.group.rotation.x = this.pitch;
-    this.tail.color.setScalar(this.accel < -3 ? 3 : 0.45);
+    this.tail.color.setScalar(this.accel < -3 ? 2 : 0.4);
     const roll = (fwd * dt) / 0.34;
     this.wheels.forEach((w, i) => {
       w.userData.spin.rotation.x -= roll;
