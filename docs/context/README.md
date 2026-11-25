@@ -17,8 +17,9 @@ Common threads: night-only setting, high-contrast neon on dark wet asphalt, sodi
 The default car sets the rendering style; images 01–04 set mood, not fidelity.
 
 - Low-poly, flat-shaded faceted surfaces — no smooth normals on body panels.
-- Body: matte graphite/charcoal, facet contrast does the shading work.
-- Emissives: cyan headlight strips and side sill accent; amber front/side markers.
-- Wheels: dark multi-spoke, thin copper/orange rim stripe, orange calipers.
-- Environment matches: blocky low-poly skyline, warm amber window lights, sparse cyan signage, faceted dark ground.
-- Palette anchors: graphite body, cyan `~#5fe0f0` emissive, amber `~#ffb040` lights/accents, near-black navy sky.
+- Body: matte graphite/charcoal wedge supercar, facet contrast does the shading work. Dark tinted glass.
+- Emissives: cyan headlight clusters and fender-vent accents, cyan lower front-lip strip; vertical amber markers in the front bumper and side sills.
+- Wheels: dark faceted multi-spoke, no rim accent.
+- Environment (not shown in 05; extrapolated): blocky low-poly skyline, warm amber window lights, sparse cyan signage, faceted dark ground.
+- Palette anchors: graphite body, cyan `~#5fe0f0` emissive, amber `~#ffb040` markers, near-black navy sky.
+- The manufacturer badge on the nose must not appear on the in-game model.
