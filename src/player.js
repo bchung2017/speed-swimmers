@@ -8,8 +8,8 @@ const MAX_REVERSE = 9;
 const ENGINE = 11; // m/s^2 at standstill, tapers to 0 at MAX_SPEED
 const BRAKE = 100;
 const GRIP = 7; // lateral velocity decay rate (1/s)
-const STEER_RATE = 2.7; // rad/s at low speed
-const STEER_FALLOFF = 30; // speed (m/s) at which steering authority halves
+const STEER_RATE = 3.3; // rad/s at low speed
+const STEER_FALLOFF = 42; // speed (m/s) at which steering authority halves
 const STEER_ASSIST = 0.8; // rate (1/s) the heading self-centers toward the road when not steering
 const SIDES = [-1, 1];
 

@@ -13,11 +13,10 @@ const pauseButton = document.getElementById('pause-button');
 const zones = [document.getElementById('touch-left'), document.getElementById('touch-right')];
 
 const input = new Input(document.getElementById('app'));
-input.onChange((left, right) => {
-  const both = left && right;
-  zones[0].classList.toggle('active', left && !both);
-  zones[1].classList.toggle('active', right && !both);
-  for (const z of zones) z.classList.toggle('braking', both);
+input.onChange((left, right, braking) => {
+  zones[0].classList.toggle('active', left && !braking);
+  zones[1].classList.toggle('active', right && !braking);
+  for (const z of zones) z.classList.toggle('braking', braking);
 });
 let shownSpeed = -1;
 const hud = {
