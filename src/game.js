@@ -182,6 +182,7 @@ export class Game {
 
   step() {
     this.player.update(STEP, this.input);
+    this.input.tick?.(STEP);
     this.traffic.update(STEP, this.player);
     const severity = this.traffic.collide(this.player);
     if (severity > 0) this.player.hit(severity);

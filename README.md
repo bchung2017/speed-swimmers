@@ -23,6 +23,10 @@ npm run dev
 | (none) | Accelerates automatically |
 | Left / Right | Steer |
 | Left + Right | Brake, then reverse |
+| Touch / mouse: hold or tap left half | Steer left (a tap counts for 0.16 s) |
+| Touch / mouse: hold or tap right half | Steer right |
+| Touch / mouse: both halves at once | Brake, then reverse |
+| Pause button (top left) | Pause menu |
 | Esc | Pause menu (Resume, Main Menu, Quit) |
 
 ## Layout

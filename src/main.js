@@ -9,8 +9,16 @@ const screens = {
 };
 const hudEl = document.getElementById('hud');
 const speedEl = document.getElementById('speed');
+const pauseButton = document.getElementById('pause-button');
+const zones = [document.getElementById('touch-left'), document.getElementById('touch-right')];
 
-const input = new Input();
+const input = new Input(document.getElementById('app'));
+input.onChange((left, right) => {
+  const both = left && right;
+  zones[0].classList.toggle('active', left && !both);
+  zones[1].classList.toggle('active', right && !both);
+  for (const z of zones) z.classList.toggle('braking', both);
+});
 let shownSpeed = -1;
 const hud = {
   speed(kmh) {
@@ -50,6 +58,8 @@ setTime(loadTime());
 function show(name) {
   for (const [key, el] of Object.entries(screens)) el.classList.toggle('hidden', key !== name);
   hudEl.classList.toggle('hidden', name !== null);
+  pauseButton.classList.toggle('hidden', name !== null);
+  for (const z of zones) z.classList.toggle('hidden', name !== null);
   if (name) screens[name].querySelector('button')?.focus();
 }
 
@@ -68,6 +78,9 @@ const actions = {
   time() {
     const i = PRESET_ORDER.indexOf(game.timeOfDay);
     setTime(PRESET_ORDER[(i + 1) % PRESET_ORDER.length]);
+  },
+  pause() {
+    setState('pause');
   },
   resume() {
     setState('playing');

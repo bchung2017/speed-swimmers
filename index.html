@@ -2,23 +2,28 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Speed Swimmers</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <div id="app"></div>
 
+    <div id="touch-left" class="touch-zone hidden"></div>
+    <div id="touch-right" class="touch-zone hidden"></div>
+
     <div id="hud" class="hidden">
       <span id="speed">0</span><span class="unit">km/h</span>
     </div>
+    <button id="pause-button" class="hidden" data-action="pause" aria-label="Pause">II</button>
 
     <div id="menu" class="overlay">
       <h1>SPEED SWIMMERS</h1>
       <button data-action="start">Start</button>
       <button data-action="time" id="time">Time: Day</button>
       <button data-action="quit">Quit</button>
-      <p class="hint">Enter to start · Arrow keys to drive · Esc to pause</p>
+      <p class="hint keys-hint">Enter to start · Left / Right to steer · both to brake · Esc to pause</p>
+      <p class="hint touch-hint">Hold left or right side to steer · both sides to brake</p>
     </div>
 
     <div id="pause" class="overlay dim hidden">
