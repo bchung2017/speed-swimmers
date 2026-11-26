@@ -125,34 +125,29 @@ body {
   cursor: pointer;
 }
 
-/* Steering feedback: a soft glow on the held side (pointer input only). */
+/* Steering feedback: a small translucent white dot low on the held side (pointer input only). */
 .touch-zone {
   position: fixed;
-  top: 0;
-  bottom: 0;
-  width: 50%;
+  bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.08s;
 }
 
 #touch-left {
-  left: 0;
-  background: linear-gradient(to right, rgba(95, 224, 240, 0.28), transparent 45%);
+  left: 25%;
 }
 
 #touch-right {
-  right: 0;
-  background: linear-gradient(to left, rgba(95, 224, 240, 0.28), transparent 45%);
+  right: 25%;
 }
 
-.touch-zone.active {
-  opacity: 1;
-}
-
+.touch-zone.active,
 .touch-zone.braking {
   opacity: 1;
-  filter: hue-rotate(160deg) saturate(2.5);
 }
 
 .touch-hint {
