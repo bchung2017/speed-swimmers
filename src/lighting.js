@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PROFILE } from './platform.js';
 
 // Time-of-day presets. Colours are sRGB hex; directions point toward the sun (player drives -z).
 export const PRESETS = {
@@ -84,7 +85,7 @@ export const PRESETS = {
 
 export const PRESET_ORDER = ['day', 'golden', 'night'];
 
-const SHADOW_EXTENT = 70; // half-size (m) of the sun's shadow box around the player
+const SHADOW_EXTENT = PROFILE.shadowExtent; // half-size (m) of the sun's shadow box around the player
 
 function skyMaterial() {
   return new THREE.ShaderMaterial({
@@ -153,7 +154,7 @@ export class Lighting {
     scene.add(this.hemi);
 
     this.sun = new THREE.DirectionalLight();
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(PROFILE.shadowMap, PROFILE.shadowMap);
     const cam = this.sun.shadow.camera;
     cam.left = cam.bottom = -SHADOW_EXTENT;
     cam.right = cam.top = SHADOW_EXTENT;
@@ -206,7 +207,7 @@ export class Lighting {
     this.sun.intensity = p.sunIntensity;
     this.sun.castShadow = p.shadows;
 
-    this.scene.fog = new THREE.FogExp2(p.fog, p.fogDensity);
+    this.scene.fog = new THREE.FogExp2(p.fog, p.fogDensity * PROFILE.fogScale);
     this.scene.background = null;
     this.renderer.toneMappingExposure = p.exposure;
     this.clouds.material.color.set(p.clouds);

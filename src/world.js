@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { MAX_TRAFFIC_WIDTH, PLAYER_WIDTH } from './car.js';
+import { PROFILE } from './platform.js';
 
 export const LANES = 5;
 // Widest vehicle + player + a small margin: two cars side by side in adjacent lanes always leave
@@ -14,7 +15,7 @@ export const laneX = (i) => -(LANES * LANE_W) / 2 + LANE_W / 2 + i * LANE_W;
 const DASH_PERIOD = 12;
 const LAMP_PERIOD = 40;
 const LAMP_COUNT = 68; // per side: covers the full view distance
-const VIEW_AHEAD = 2700; // matches the city's streamed distance
+const VIEW_AHEAD = PROFILE.viewBlocks * 300 - 300; // matches the city's streamed distance
 const LAMP_ON = new THREE.Color(0xfff0d8).multiplyScalar(6);
 const LAMP_OFF = new THREE.Color(0x8a8d90);
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { facadeMaterial, TILE } from './facades.js';
+import { PROFILE } from './platform.js';
 import { ROAD_HALF, mulberry } from './world.js';
 
 // Procedural city alongside the highway, streamed in SEG-metre blocks.
@@ -15,7 +16,9 @@ import { ROAD_HALF, mulberry } from './world.js';
 // packed together and each mesh draws only the instances in use.
 
 const SEG = 300;
-const ACTIVE = 10; // blocks kept alive: 1 behind the player, 9 ahead (~2.7 km)
+const ACTIVE = PROFILE.viewBlocks; // blocks kept alive: 1 behind the player, the rest ahead
+// Trees and far skyline towers are thinned by this (near buildings are kept: they define the street).
+const DENSITY = PROFILE.cityDensity;
 const EDGE = ROAD_HALF + 0.7; // outer face of the barriers
 const SHORE = EDGE + 38; // waterfront: promenade width before the water
 const FAR_SHORE = 1150; // waterfront: distance to the opposite shore
@@ -485,7 +488,10 @@ export class City {
       const w = 25 + rnd() * 35;
       const h = hMin + Math.pow(rnd(), 1.6) * (hMax - hMin);
       const kind = pick(rnd, ['glass', 'darkglass', 'white', 'glass', 'concrete', 'limestone']);
-      this.#building(rnd, side, x, w, z0 + rnd() * SEG, w * (0.7 + rnd() * 0.6), h, kind);
+      const z = z0 + rnd() * SEG;
+      // Thin the lower towers on lighter profiles; the tall landmarks always stay.
+      if (rnd() > DENSITY && h < hMax * 0.6) continue;
+      this.#building(rnd, side, x, w, z, w * (0.7 + rnd() * 0.6), h, kind);
     }
   }
 
@@ -495,6 +501,7 @@ export class City {
       const x = side * (xFrom + rnd() * (xTo - xFrom));
       const z = z0 + rnd() * (z1 - z0);
       const s = size[0] + rnd() * (size[1] - size[0]);
+      if (rnd() > DENSITY) continue;
       const g = col.setRGB(0.18 + rnd() * 0.12, 0.32 + rnd() * 0.18, 0.12 + rnd() * 0.08).getHex();
       if (rnd() < coniferShare) this.#place('conifer', x, y, z, s * 0.9, s * 1.3, s * 0.9, rnd() * 6, g);
       else this.#place('deciduous', x, y, z, s, s, s, rnd() * 6, g);

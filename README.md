@@ -63,6 +63,22 @@ npm run dev
 | Time-of-day colours, sun, fog, exposure | `PRESETS` in `src/lighting.js` |
 | District mix, block size, view distance, densities | `district()`, `SEG`, `ACTIVE`, `CAP` in `src/city.js` |
 
+## Quality profiles
+
+The game targets phones. `src/platform.js` picks a profile: touch devices get **mobile**, others **desktop**. Force one with `?quality=mobile` or `?quality=desktop`.
+
+| | Mobile | Desktop |
+|---|---|---|
+| Pixel ratio cap | 1.25 | 1.5 |
+| Dynamic resolution floor | 50% | 60% |
+| MSAA | off | 2x (high-DPI) / 4x |
+| Sun shadow map / box | 1024 px / 90 m | 2048 px / 140 m, soft |
+| City view distance | 7 blocks (~1.8 km) | 10 blocks (~2.7 km) |
+| Trees and lower far towers | 60% | 100% |
+| Fog density | 1.5x | 1x |
+
+The camera keeps a 60° vertical field of view on landscape screens and at least 78° horizontal on portrait ones (capped at 105° vertical), widening with speed.
+
 ## Performance notes
 
 - Traffic is drawn with one `InstancedMesh` per vehicle type and material layer; the city with one per object kind. ~45 draw calls plus the shadow pass in daylight.

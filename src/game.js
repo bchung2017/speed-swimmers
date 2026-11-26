@@ -5,16 +5,17 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { City } from './city.js';
 import { Lighting } from './lighting.js';
+import { MOBILE, PROFILE } from './platform.js';
 import { Player } from './player.js';
 import { Traffic } from './traffic.js';
 import { World } from './world.js';
 import { Wreckage } from './wreck.js';
 
 const STEP = 1 / 120;
-// Retina panels at full devicePixelRatio cost 4x the pixels of 1x; cap it.
-const MAX_PIXEL_RATIO = 1.5;
+// High-DPI panels at full devicePixelRatio cost 4-9x the pixels of 1x; cap it (see platform.js).
+const MAX_PIXEL_RATIO = PROFILE.maxPixelRatio;
 // Dynamic resolution: scale the render size between these to hold frame rate.
-const MIN_SCALE = 0.6;
+const MIN_SCALE = PROFILE.minScale;
 const SLOW_FRAME = 1 / 50;
 const FAST_FRAME = 1 / 58;
 
@@ -32,6 +33,13 @@ const CAM_DISTANCE_PER_MS = 0.012; // extra distance per m/s of speed
 const CAM_HEIGHT = 3;
 const CAM_LOOK_AHEAD = 6;
 const CAM_LOOK_HEIGHT = 0.9;
+// Field of view: CAM_VFOV vertically on landscape screens, but never narrower than CAM_MIN_HFOV
+// horizontally, so a portrait phone still sees the lanes either side. Both widen with speed.
+const CAM_VFOV = 60;
+const CAM_MIN_HFOV = MOBILE ? 78 : 70;
+const CAM_FOV_SPEED = 0.17; // extra degrees per m/s
+const CAM_FOV_MAX_EXTRA = 16;
+const CAM_VFOV_MAX = 105; // caps the vertical stretch on very tall screens
 
 export class Game {
   constructor(container, input, hud) {
@@ -44,16 +52,16 @@ export class Game {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.95;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = PROFILE.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     container.appendChild(renderer.domElement);
     this.renderer = renderer;
 
     this.scene = new THREE.Scene();
     // Far plane covers the distant skyline (the sky dome is drawn at the far plane regardless).
-    this.camera = new THREE.PerspectiveCamera(62, container.clientWidth / container.clientHeight, 0.5, 3000);
+    this.camera = new THREE.PerspectiveCamera(62, container.clientWidth / container.clientHeight, 0.5, PROFILE.farPlane);
 
     // MSAA matters less on high-DPI screens, where it is also most expensive.
-    const samples = window.devicePixelRatio > 1 ? 2 : 4;
+    const samples = PROFILE.msaa;
     const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples });
     this.composer = new EffectComposer(renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -232,7 +240,11 @@ export class Game {
       p.renderZ + this.camDir.y * CAM_LOOK_AHEAD,
     );
     this.camera.lookAt(this.lookAt);
-    const fov = 62 + Math.min(16, speed * 0.17);
+    const extra = Math.min(CAM_FOV_MAX_EXTRA, speed * CAM_FOV_SPEED);
+    const fromH = THREE.MathUtils.radToDeg(
+      2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(CAM_MIN_HFOV + extra) / 2) / this.camera.aspect),
+    );
+    const fov = Math.min(CAM_VFOV_MAX, Math.max(CAM_VFOV + extra, fromH));
     if (Math.abs(this.camera.fov - fov) > 0.01) {
       this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, fov, Math.min(1, k * 2));
       this.camera.updateProjectionMatrix();
